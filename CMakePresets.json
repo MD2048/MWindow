@@ -1,0 +1,146 @@
+{
+  "version": 3,
+
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "installDir": "${sourceDir}/out/install/${presetName}",
+      "cacheVariables": {
+        "CMAKE_CXX_STANDARD": "20",
+        "CMAKE_CXX_STANDARD_REQUIRED": "ON",
+        "BUILD_SHARED_LIBS": "OFF"
+      },
+      "warnings": {
+        "dev": false
+      }
+    },
+    {
+      "name": "windows-debug",
+      "inherits": "base",
+      "displayName": "Windows Debug",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_COMPILER": "cl",
+        "CMAKE_CXX_COMPILER": "cl"
+      }
+    },
+    {
+      "name": "windows-release",
+      "inherits": "windows-debug",
+      "displayName": "Windows Release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_C_COMPILER": "cl",
+        "CMAKE_CXX_COMPILER": "cl"
+      }
+    },
+    {
+      "name": "linux-debug",
+      "inherits": "base",
+      "displayName": "Linux Debug",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "linux-release",
+      "inherits": "linux-debug",
+      "displayName": "Linux Release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "macos-debug",
+      "inherits": "base",
+      "displayName": "macOS Debug",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "macos-release",
+      "inherits": "macos-debug",
+      "displayName": "macOS Release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "android-base",
+      "inherits": "base",
+      "hidden": true,
+      "cacheVariables": {
+        "ANDROID_PLATFORM": "android-21",
+        "CMAKE_EXE_LINKER_FLAGS": "-L C:/Users/marto/Desktop/C++/External/android-ndk-r29/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/aarch64-linux-android/21",
+        "CMAKE_TOOLCHAIN_FILE": "C:/Users/marto/Desktop/C++/External/android-ndk-r29/build/cmake/android.toolchain.cmake",
+        "ANDROID_STL": "c++_static"
+        
+      },
+      "environment": {
+            "ANDROID_NDK_HOME": "C:/Users/marto/Desktop/C++/External/android-ndk-r29"
+        }
+    },
+    {
+      "name": "android-arm64-debug",
+      "inherits": "android-base",
+      "displayName": "Android ARM64 Debug",
+      "cacheVariables": {
+        "ANDROID_ABI": "arm64-v8a",
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "android-arm64-release",
+      "inherits": "android-arm64-debug",
+      "displayName": "Android ARM64 Release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "ios-base",
+      "inherits": "base",
+      "hidden": true,
+      "cacheVariables": {
+        "CMAKE_SYSTEM_NAME": "iOS",
+        "CMAKE_OSX_ARCHITECTURES": "arm64",
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "13.0"
+      }
+    },
+    {
+      "name": "ios-debug",
+      "inherits": "ios-base",
+      "displayName": "iOS Debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "ios-release",
+      "inherits": "ios-debug",
+      "displayName": "iOS Release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    }
+  ]
+}
