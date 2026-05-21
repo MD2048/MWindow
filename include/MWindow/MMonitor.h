@@ -2,30 +2,56 @@
 #define M_MONITOR_H
 
 #include <cstdint>
+#include <string>
+#include <cstddef>
+#include <vector>
+
+#include "MWindow/MDef.h"
 
 namespace MW
 {
+    using MMonitorID = uint64_t;
+
     struct MVideoMode {
         uint32_t widthPx;
         uint32_t heightPx;
         uint32_t refreshRate;
+        uint32_t bitsPerChannel;  // typically 8, 10, or 16
+
+        bool operator==(const MVideoMode& m)
+        {
+            return (widthPx == m.widthPx) && (heightPx == m.heightPx) &&
+                (refreshRate == m.refreshRate) && (bitsPerChannel == m.bitsPerChannel);
+        }
+    };
+
+    enum class MColorGamut {
+        Unknown,
+        SRGB,       // standard, ~99% of monitors
+        DCI_P3,     // wide gamut, most Apple displays
+        Rec2020,    // ultra wide, high-end HDR monitors
+    };
+
+    struct MHDRInfo {
+        bool         supported;
+        bool         active;         // HDR currently enabled in OS settings
+        float        maxLuminance;   // peak brightness in nits
+        float        minLuminance;   // black level in nits
+        MColorGamut  colorGamut;
     };
 
     struct MMonitor {
-        uint32_t    id;
+        MMonitorID  id;
         std::string name;
 
-        // Position and size in logical virtual desktop space
-        float x, y;
-        float widthLogical, heightLogical;
+        MRect    rect;       // logical virtual desktop space
+        float    dpiScale;
+        bool     isPrimary;
 
-        float    dpiScale;      // e.g. 2.0 on Retina
-        uint32_t dpi;           // raw DPI value
-
-        bool isPrimary;
-
-        MVideoMode currentMode;
+        std::size_t             currentModeIndex;
         std::vector<MVideoMode> availableModes;
+
+        MHDRInfo hdr;
     };
 
 } // namespace MW

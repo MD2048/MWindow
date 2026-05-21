@@ -2,6 +2,10 @@
 
 namespace MW
 {
+    MWindowImpl::MWindowImpl(const MWindowDesc& desc) {  }
+
+    MWindowImpl::~MWindowImpl() {  }
+
     void MWindowImpl::show()  {  }
     void MWindowImpl::hide()  {  }
     void MWindowImpl::close() {  }
@@ -14,12 +18,12 @@ namespace MW
     const std::string& MWindowImpl::getTitle() const {  }
 
     void     MWindowImpl::resize(MSize sz) {  } // logical
-    float MWindowImpl::getWidth()  const {  }              // logical
-    float MWindowImpl::getHeight() const {  }              // logical
+    MSize MWindowImpl::getSize()  const {  }            // logical
 
-    void  MWindowImpl::setPosition(MPoint p) {  }    // logical, desktop
-    float MWindowImpl::getX() const {  }
-    float MWindowImpl::getY() const {  }
+    void  MWindowImpl::setTopLeftCorner(MPoint p) {  }    // logical, virtual desktop
+    MPoint MWindowImpl::getTopLeftCorner() const {  }
+
+    MRect MWindowImpl::getRect() const {  }
 
     void        MWindowImpl::setWindowMode(MWindowMode mode) {  }
     MWindowMode MWindowImpl::getWindowMode() const {  }
@@ -35,12 +39,6 @@ namespace MW
     MSize MWindowImpl::getPhysicalSize() const {  }
 
     MRenderSurface MWindowImpl::getRenderSurface() const {  }
-
-    // ── Event handlers ────────────────────────────────────────────────────
-    // Handlers are called in registration order.
-    // Return EventResult::Consumed to stop propagation.
-    void MWindowImpl::pushEventHandler(MEventHandler handler) {  }
-    void MWindowImpl::popEventHandler() {  }
 
     // ── Factory ───────────────────────────────────────────────────────────
     [[nodiscard]] std::unique_ptr<MWindow> MWindowImpl::create(const MWindowDesc& desc) {

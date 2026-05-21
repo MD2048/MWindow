@@ -27,11 +27,12 @@ endif()
 if(WIN32)
     target_compile_definitions(MWindow PUBLIC MPLATFORM_WINDOWS)
     target_sources(MWindow
-    PRIVATE
+        PRIVATE
 
-    src/platform/windows/MWindowImpl.cpp
-    src/platform/windows/MGlobalImpl.cpp
-)
+        src/platform/windows/MWindowImpl.cpp
+        src/platform/windows/MGlobalImpl.cpp
+    )
+    target_link_libraries(MWindow PRIVATE Shcore dxgi.lib)
 elseif(ANDROID)
     target_link_options(MWindow INTERFACE "-Wl,--export-dynamic")
 
@@ -54,6 +55,7 @@ target_sources(MWindow
     PRIVATE
 
     src/MWindow.cpp
+    src/MGlobalBase.cpp
 ) 
 
 target_include_directories(MWindow
@@ -62,6 +64,7 @@ target_include_directories(MWindow
         $<INSTALL_INTERFACE:include>
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/platform
+        ${CMAKE_CURRENT_SOURCE_DIR}/internal
 )
 
 include(GNUInstallDirs)

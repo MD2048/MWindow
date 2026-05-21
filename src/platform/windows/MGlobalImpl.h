@@ -2,41 +2,73 @@
 #define M_GLOBALIMPL_H
 
 #ifndef MPLATFORM_WINDOWS
-    #error "src/platform/windows/MGlobalImpl.h should not be included on the current platform!"
+    //#error "src/platform/windows/MGlobalImpl.h should not be included on the current platform!"
 #endif
 
+#include "MWindow/MMonitor.h"
 #include "MWindow/MEvents.h"
 #include "MWindow/MWindowInit.h"
+#include "headers/MGlobalBase.h"
 
 #include <vector>
+#include <optional>
 
 
 namespace MW {
+
+    constexpr int WINDOWS_DEVICE_COUNT { 6 };
+    constexpr int WINDOWS_MONITOR_COUNT { 4 };
+    constexpr int WINDOWS_GLOBAL_HANDLER_COUNT { 4 };
+
     class MGlobal {
     private:
-        static std::vector<MDeviceInfo> devices;
-        static std::vector<MMonitor> monitors;
+        static MGlobal* ptr;
+
+        MGlobalBase base;
+        std::vector<std::pair<void*, MMonitorID>> monitorHandles;
+        std::vector<std::pair<void*, MDeviceID>> deviceHandles;
+        void* notificationHWND;
+
+        MGlobal(const MInitConfig& config);
+
+        void createNotificationWindow();
+        void registerRawInputDevices();
+
+        void enumerateInputDevices();
+        void enumerateMonitors();
+
+        std::vector<std::pair<MDeviceID, MDeviceState>>* getStatePtr() const;
     public:
-        static void init(const MInitConfig& config = {});
+        static MGlobal* init(const MInitConfig& config = {});
+        static MGlobal& Get();
         static void shutdown();
 
+        ~MGlobal();
+
         // Drains the event queue, walks each event through registered handler chains
-        static void poll();
+        void poll();
 
         //bool isRunning();
 
         // Device query
-        static const std::vector<MDeviceInfo>& getConnectedDevices();
+        std::vector<MDeviceInfo>    getConnectedDevices();
+        std::optional<MDeviceState> getDeviceState(MDeviceID id);
+        bool                        isDeviceConnected(MDeviceID id);
 
         // Monitor query
-        static const std::vector<MMonitor>& getMonitors();
-        static const MMonitor&              getPrimaryMonitor();
+        std::vector<MMonitor>   getConnectedMonitors();
+        std::optional<MMonitor> getMonitor(MMonitorID id);
+        const MMonitor&         getPrimaryMonitor();
+        bool                    isMonitorConnected(MMonitorID id);
 
-        static float getCursorX();
-        static float getCursorY();
+        MEventHandlerID registerGlobalEventHandler(MEventHandler ha);
+        void unregisterGlobalEventHandler(MEventHandlerID id);
+
+        float getCursorX();
+        float getCursorY();
 
         // Key state query for between-event polling
-        static bool isKeyHeld(MKey key);
+        bool isKeyHeld(MKey key);
     };
 }
 

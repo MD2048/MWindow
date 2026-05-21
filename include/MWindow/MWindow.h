@@ -12,10 +12,13 @@
 #include "MWindow/MWindowInit.h"
 #include "MWindow/MDef.h"
 #include "MWindow/MRendering.h"
+#include "MWindow/MWindowState.h"
 
 #include <cstdint>
 #include <vector>
+#include <mutex>
 #include <memory>
+#include <optional>
 
 namespace MW {
 
@@ -27,12 +30,20 @@ namespace MW {
 
     //bool isRunning();
 
+    MEventHandlerID registerGlobalEventHandler(MEventHandler ha);
+    void            unregisterGlobalEventHandler(MEventHandlerID id);
+
+
     // Device query
-    const std::vector<MDeviceInfo>& getConnectedDevices();
+    std::vector<MDeviceInfo>    getConnectedDevices();
+    std::optional<MDeviceState> getDeviceState(MDeviceID id);
+    bool                        isDeviceConnected(MDeviceID id);
 
     // Monitor query
-    const std::vector<MMonitor>& getMonitors();
-    const MMonitor&              getPrimaryMonitor();
+    std::vector<MMonitor>   getConnectedMonitors();
+    std::optional<MMonitor> getMonitor(MMonitorID id);
+    const MMonitor&         getPrimaryMonitor();
+    bool                    isMonitorConnected(MMonitorID id);
 
     float getCursorX();
     float getCursorY();
@@ -41,7 +52,24 @@ namespace MW {
     bool isKeyHeld(MKey key);
     
     class MWindow {
+    private:
+        std::size_t maxHandlers;
+        std::mutex consumerLock;
+        std::vector<MEventHandler> handlers;
+        std::vector<MEventHandlerID> id_table;
+        std::size_t handlerCount;
+        MEventHandlerID nextID;
+
+        MWindowState state;
+    protected:
+        MWindow();
     public:
+
+        void executeHandlerChain(const MEvent& ev);
+
+        MEventHandlerID registerEventHandler(MEventHandler ha);
+        void            unregisterEventHandler(MEventHandlerID id);
+
         virtual ~MWindow() = default;
 
         // ── Lifecycle ─────────────────────────────────────────────────────────
@@ -57,12 +85,12 @@ namespace MW {
         virtual const std::string& getTitle() const = 0;
 
         virtual void     resize(MSize sz) = 0; // logical
-        virtual float getWidth()  const = 0;              // logical
-        virtual float getHeight() const = 0;              // logical
+        virtual MSize getSize()  const = 0;              // logical
 
-        virtual void  setPosition(MPoint p) = 0;    // logical, virtual desktop
-        virtual float getX() const = 0;
-        virtual float getY() const = 0;
+        virtual void  setTopLeftCorner(MPoint p) = 0;    // logical, virtual desktop
+        virtual MPoint getTopLeftCorner() const = 0;
+
+        virtual MRect getRect() const = 0;
 
         virtual void        setWindowMode(MWindowMode mode) = 0;
         virtual MWindowMode getWindowMode() const = 0;
@@ -80,10 +108,10 @@ namespace MW {
         virtual MRenderSurface getRenderSurface() const = 0;
 
         // ── Event handlers ────────────────────────────────────────────────────
-        // Handlers are called in registration order.
+        // Newest handler gets called first
         // Return EventResult::Consumed to stop propagation.
-        virtual void pushEventHandler(MEventHandler handler) = 0;
-        virtual void popEventHandler() = 0;
+        virtual MEventHandlerID pushEventHandler(MEventHandler handler) = 0;
+        virtual void popEventHandler(MEventHandlerID id) = 0;
 
         // ── Factory ───────────────────────────────────────────────────────────
         [[nodiscard]] static std::unique_ptr<MWindow> create(const MWindowDesc& desc);

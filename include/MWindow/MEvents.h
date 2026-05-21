@@ -2,6 +2,7 @@
 #define M_EVENTS_H
 
 #include "MWindow/MDef.h"
+#include "MWindow/MDevices.h"
 
 #include <cstdint>
 #include <string>
@@ -21,15 +22,6 @@ namespace MW {
 
         X1,
         X2,
-    };
-
-    enum class MDeviceType   { Keyboard, Mouse, Touchscreen, Gamepad/*, Stylus*/ };
-    // Gamepad = Controller
-
-    struct MDeviceInfo {
-        uint32_t   id;
-        MDeviceType type;
-        std::string name;
     };
 
     enum class MKey : uint32_t {
@@ -72,17 +64,6 @@ namespace MW {
         KPSubtract, KPAdd, KPEnter,
     };
 
-    struct MMods {
-        bool shift : 1;
-        bool ctrl  : 1;
-        bool alt   : 1;
-        bool super : 1;   // Win / Cmd
-        bool caps  : 1;   // CapsLock state, not the key itself
-        bool num   : 1;   // NumLock state
-
-        bool none() const { return !shift && !ctrl && !alt && !super; }
-    };
-
 
     enum class MVisibilility : uint32_t {
         Shown,
@@ -115,54 +96,61 @@ namespace MW {
     };
 
     struct MKeyPressEvent {
-        uint32_t deviceId;
+        uint64_t timestamp;
+        MDeviceID deviceId;
         MKey key;
         uint32_t scancode;
         MMods mods;
     };
 
     struct MKeyReleaseEvent {
-        uint32_t deviceId;
+        uint64_t timestamp;
+        MDeviceID deviceId;
         MKey key;
         uint32_t scancode;
         MMods mods;
     };
 
     struct MCharEvent {
-        uint32_t deviceId;
+        MDeviceID deviceId;
         std::string input;
     };
 
     struct MMouseMoveEvent {
-        uint32_t deviceId;
+        uint64_t timestamp;
+        MDeviceID deviceId;
         MPoint new_pos;
         float dx, dy;
     };
 
     struct MMouseButtonPressEvent {
-        uint32_t deviceId;
+        uint64_t timestamp;
+        MDeviceID deviceId;
         MMouseButton button;
         MMods mods;
     };
 
     struct MMouseButtonReleaseEvent {
-        uint32_t deviceId;
+        uint64_t timestamp;
+        MDeviceID deviceId;
         MMouseButton button;
         MMods mods;
     };
 
     struct MMouseScrollEvent {
-        uint32_t deviceId;
+        uint64_t timestamp;
+        MDeviceID deviceId;
         float dx;
         float dy;
         MMods mods;
     };
 
-    struct MMouseEnterEvent { uint32_t deviceId; };
+    struct MMouseEnterEvent { MDeviceID deviceId; };
 
-    struct MMouseLeaveEvent { uint32_t deviceId; };
+    struct MMouseLeaveEvent { MDeviceID deviceId; };
 
     struct MTouchBeginEvent {
+        uint64_t timestamp;
         TouchID id;
 
         float x;
@@ -170,6 +158,7 @@ namespace MW {
     };
 
     struct MTouchMoveEvent {
+        uint64_t timestamp;
         TouchID id;
 
         float x;
@@ -180,6 +169,7 @@ namespace MW {
     };
     
     struct MTouchEndEvent {
+        uint64_t timestamp;
         TouchID id;
 
         float x;
@@ -187,6 +177,7 @@ namespace MW {
     };
 
     struct MTouchCancelEvent {
+        uint64_t timestamp;
         TouchID id;
     };
 
@@ -223,7 +214,11 @@ namespace MW {
             MTouchBeginEvent,
             MTouchMoveEvent,
             MTouchEndEvent,
-            MTouchCancelEvent
+            MTouchCancelEvent,
+
+            //Devices
+            MDeviceConnectedEvent,
+            MDeviceDisconnectedEvent
             // Drop - cut from 1. version
             // MDropEnterEvent,
             // MDropMoveEvent,
@@ -235,6 +230,7 @@ namespace MW {
     enum class MEventResult { Continue, Consumed };
 
     using MEventHandler = std::function<MEventResult(const MEvent&)>;
+    using MEventHandlerID = uint64_t;
 }
 
 #endif

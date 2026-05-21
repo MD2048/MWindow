@@ -9,12 +9,13 @@
 
 namespace MW
 {
+    using MWindowID = uint64_t;
+
     enum class MWindowMode      { Windowed, Fullscreen, BorderlessFullscreen };
 
     struct MWindowDesc {
-        std::string     title   = "MWindow";
-        uint32_t        width   = 1280;   // logical pixels
-        uint32_t        height  = 720;    // logical pixels
+        std::string      title   = "MWindow";
+        MRect            rect    = {0,0,0,0};
         MWindowMode      mode    = MWindowMode::Windowed;
         MRendererBackend backend = MRendererBackend::None;
 
@@ -22,12 +23,10 @@ namespace MW
         bool decorated  = true;
         bool visible    = true;
 
-        // Logical position in virtual desktop space. -1 = centre on primary monitor
-        float x = -1;
-        float y = -1;
+        bool centered   = true;
 
-        // nullptr = use primary monitor
-        const MMonitor* monitor = nullptr;
+        // -1 = use primary monitor
+        MMonitorID monitor = -1;
     };
 
     enum class MCoalescePolicy {
@@ -37,7 +36,7 @@ namespace MW
     };
 
     struct MInitConfig {
-        uint32_t       eventQueueCapacity = 256;  // must be power of 2
+        std::size_t     eventQueueCapacity = 256;  // must be power of 2
         MCoalescePolicy mouseMovePolicy    = MCoalescePolicy::Latest;
         MCoalescePolicy touchMovePolicy    = MCoalescePolicy::Latest;
         MCoalescePolicy scrollPolicy       = MCoalescePolicy::Accumulate;

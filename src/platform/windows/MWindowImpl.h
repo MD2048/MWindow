@@ -8,8 +8,15 @@
 #include "MWindow/MWindow.h"
  
 namespace MW {
+    class MGlobal;
     class MWindowImpl : public MWindow
     {
+    private:
+        MGlobal* global;
+        
+    public:
+        MWindowImpl(const MWindowDesc& desc);
+
         ~MWindowImpl() override;
 
         // ── Lifecycle ─────────────────────────────────────────────────────────
@@ -25,12 +32,12 @@ namespace MW {
         const std::string& getTitle() const override;
 
         void     resize(MSize sz) override; // logical
-        float getWidth()  const override;              // logical
-        float getHeight() const override;              // logical
+        MSize getSize()  const override;              // logical
 
-        void  setPosition(MPoint p) override;    // logical, desktop
-        float getX() const override;
-        float getY() const override;
+        void  setTopLeftCorner(MPoint p) override;    // logical, virtual desktop
+        MPoint getTopLeftCorner() const override;
+
+        MRect getRect() const override;
 
         void        setWindowMode(MWindowMode mode) override;
         MWindowMode getWindowMode() const override;
@@ -46,12 +53,6 @@ namespace MW {
         MSize getPhysicalSize() const override;
 
         MRenderSurface getRenderSurface() const override;
-
-        // ── Event handlers ────────────────────────────────────────────────────
-        // Handlers are called in registration order.
-        // Return EventResult::Consumed to stop propagation.
-        void pushEventHandler(MEventHandler handler) override;
-        void popEventHandler() override;
 
         // ── Factory ───────────────────────────────────────────────────────────
         [[nodiscard]] static std::unique_ptr<MWindow> create(const MWindowDesc& desc);
