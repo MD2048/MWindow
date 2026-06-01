@@ -34,7 +34,7 @@ namespace MW
     
     struct MRect {
         float x{ 0 };       // stores top left corner
-        float y{ 0 };
+        float y{ 0 };       // y increases downwards
         float width{ 0 };
         float height{ 0 };
 
@@ -45,9 +45,10 @@ namespace MW
 
         constexpr MPoint topLeft() const noexcept { return { x, y }; }
         constexpr MPoint topRight() const noexcept { return { x + width, y }; }
-        constexpr MPoint bottomLeft() const noexcept { return {x, y - height}; }
-        constexpr MPoint bottomRight() const noexcept { return { x + width, y - height }; }
+        constexpr MPoint bottomLeft() const noexcept { return {x, y + height}; }
+        constexpr MPoint bottomRight() const noexcept { return { x + width, y + height }; }
         constexpr MSize  size() const noexcept { return { width, height }; }
+        constexpr bool   contains(MPoint p) const noexcept { return (x <= p.x) && (p.x < x+width) && (y <= p.y) && (p.y < y+height); }
     };   
 }
 

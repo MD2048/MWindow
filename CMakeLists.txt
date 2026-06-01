@@ -32,7 +32,7 @@ if(WIN32)
         src/platform/windows/MWindowImpl.cpp
         src/platform/windows/MGlobalImpl.cpp
     )
-    target_link_libraries(MWindow PRIVATE Shcore dxgi.lib)
+    target_link_libraries(MWindow PRIVATE Shcore dxgi.lib dwmapi.lib)
 elseif(ANDROID)
     target_link_options(MWindow INTERFACE "-Wl,--export-dynamic")
 
@@ -55,7 +55,7 @@ target_sources(MWindow
     PRIVATE
 
     src/MWindow.cpp
-    src/MGlobalBase.cpp
+    
 ) 
 
 target_include_directories(MWindow

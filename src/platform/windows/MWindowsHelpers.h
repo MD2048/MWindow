@@ -4,10 +4,124 @@
 #include "MWindow/MDevices.h"
 #include "MWindow/MMonitor.h"
 
+#include <algorithm>
+#include <limits>
+#include <cmath>
+
+#ifndef NOMINMAX
+    #define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+    #define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
 #include <dxgi1_6.h>
 
 using namespace MW;
+
+inline RECT MRectToRECT(const MRect& mr, float scale)
+{
+    return RECT{
+        static_cast<LONG>(mr.x/scale),
+        static_cast<LONG>(mr.y/scale),
+        static_cast<LONG>((mr.x + mr.width)/scale),
+        static_cast<LONG>((mr.y + mr.height)/scale)
+    };
+}
+
+inline MRect RECTToMRect(const RECT& r, float scale)
+{
+    return MRect{
+        static_cast<float>(r.left*scale),
+        static_cast<float>(r.top*scale),
+        static_cast<float>((r.right - r.left)*scale),
+        static_cast<float>((r.bottom - r.top)*scale)
+    };
+}
+
+inline std::wstring toWide(const std::string& s) {
+    if (s.empty())
+        return {};
+    int len = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
+    std::wstring w(len, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, w.data(), len);
+    return w;
+}
+inline std::string toNarrow(const std::wstring& wstr)
+{
+    if (wstr.empty())
+        return {};
+    int size = WideCharToMultiByte(CP_UTF8, 0,wstr.data(),(int)wstr.size(),nullptr,0,nullptr,nullptr);
+    std::string result(size, 0);
+    WideCharToMultiByte(CP_UTF8, 0, wstr.data(), (int)wstr.size(), result.data(), size, nullptr, nullptr);
+    return result;
+}
+
+
+inline MRect resolveWindowRect(MRect rect, const std::vector<MMonitor>& monitors) {
+
+    // ── Find primary monitor ───────────────────────────────────────────────
+    const MMonitor* primary = nullptr;
+    for (const auto& mon : monitors)
+        if (mon.isPrimary) { primary = &mon; break; }
+
+    // Fallback — should never happen but be safe
+    if (!primary && !monitors.empty())
+        primary = &monitors[0];
+
+    if (!primary) return rect;
+
+    // ── Handle -1 centering ────────────────────────────────────────────────
+    if (rect.x < 0 || rect.y < 0) {
+        rect.x = primary->rect.x + (primary->rect.width  - rect.width)  * 0.5f;
+        rect.y = primary->rect.y + (primary->rect.height - rect.height) * 0.5f;
+    }
+
+    // ── Find which monitor the window's center falls on ───────────────────
+    float cx = rect.x + rect.width  * 0.5f;
+    float cy = rect.y + rect.height * 0.5f;
+
+    const MMonitor* target = nullptr;
+    for (const auto& mon : monitors) {
+        if (cx >= mon.rect.x && cx < mon.rect.x + mon.rect.width &&
+            cy >= mon.rect.y && cy < mon.rect.y + mon.rect.height) {
+            target = &mon;
+            break;
+        }
+    }
+
+    // Center falls outside all monitors — find nearest by distance to center
+    if (!target) {
+        float bestDist = std::numeric_limits<float>::max();
+        for (const auto& mon : monitors) {
+            float monCx = mon.rect.x + mon.rect.width  * 0.5f;
+            float monCy = mon.rect.y + mon.rect.height * 0.5f;
+            float dx = cx - monCx;
+            float dy = cy - monCy;
+            float dist = dx*dx + dy*dy; // no need to sqrt, comparing only
+            if (dist < bestDist) { bestDist = dist; target = &mon; }
+        }
+    }
+
+    if (!target) return rect;
+
+    // ── Clamp to target monitor ────────────────────────────────────────────
+    // Ensure the window doesn't extend beyond the monitor's edges.
+    // Clamp size first so a window larger than the monitor is shrunk,
+    // then clamp position so it sits within bounds.
+    rect.width  = std::min(rect.width,  target->rect.width);
+    rect.height = std::min(rect.height, target->rect.height);
+
+    rect.x = std::clamp(rect.x,
+        target->rect.x,
+        target->rect.x + target->rect.width  - rect.width);
+
+    rect.y = std::clamp(rect.y,
+        target->rect.y,
+        target->rect.y + target->rect.height - rect.height);
+
+    return rect;
+}
 
 inline MDeviceType toMDeviceType(const RAWINPUTDEVICELIST& entry) {
     switch (entry.dwType) {

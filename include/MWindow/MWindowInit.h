@@ -11,22 +11,21 @@ namespace MW
 {
     using MWindowID = uint64_t;
 
-    enum class MWindowMode      { Windowed, Fullscreen, BorderlessFullscreen };
+    enum class MWindowMode : uint32_t  { Windowed, Fullscreen, BorderlessFullscreen };
 
     struct MWindowDesc {
         std::string      title   = "MWindow";
-        MRect            rect    = {0,0,0,0};
+        MRect            rect    = {100,100,800,600};
         MWindowMode      mode    = MWindowMode::Windowed;
         MRendererBackend backend = MRendererBackend::None;
 
-        bool resizable  = true;
-        bool decorated  = true;
+        bool resizable  = true;     // best effort
+        bool decorated  = true;     // best effort
         bool visible    = true;
 
         bool centered   = true;
 
-        // -1 = use primary monitor
-        MMonitorID monitor = -1;
+        MMonitorID monitor;
     };
 
     enum class MCoalescePolicy {
@@ -40,6 +39,11 @@ namespace MW
         MCoalescePolicy mouseMovePolicy    = MCoalescePolicy::Latest;
         MCoalescePolicy touchMovePolicy    = MCoalescePolicy::Latest;
         MCoalescePolicy scrollPolicy       = MCoalescePolicy::Accumulate;
+    };
+
+    struct MEventHandlerEntry {
+        MEventHandlerID id;
+        MEventHandler   handler;
     };
 
 } // namespace MW

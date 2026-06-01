@@ -43,7 +43,7 @@ namespace MW {
         return ptr->getConnectedDevices();
     }
 
-    std::optional<MDeviceState> getDeviceState(MDeviceID id) { 
+    std::optional<MDeviceState const*> getDeviceState(MDeviceID id) { 
         assert(ptr && "MWindow::getDeviceState(): Initialize MWindow before calling this function!"); 
         return ptr->getDeviceState(id); 
     }
@@ -63,7 +63,7 @@ namespace MW {
         assert(ptr && "MWindow::getMonitor(): Initialize MWindow before calling this function!"); 
         return ptr->getMonitor(id); }
 
-    const MMonitor& getPrimaryMonitor() { 
+    std::optional<MMonitor> getPrimaryMonitor() { 
         assert(ptr && "MWindow::getPrimaryMonitor(): Initialize MWindow before calling this function!"); 
         return ptr->getPrimaryMonitor(); }
 
@@ -85,68 +85,44 @@ namespace MW {
         return ptr->isKeyHeld(key); 
     }
 
-    std::unique_ptr<MWindow> MWindow::create(const MWindowDesc& desc) {
+    [[nodiscard]] std::unique_ptr<MWindow> MWindow::create(const MWindowDesc& desc) {
         assert(ptr && "MWindow::create(): Initialize MWindow before calling this function!"); 
         return std::make_unique<MWindowImpl>(desc);
     }
 
     MWindow::MWindow()
-    : maxHandlers{8}
-    , handlerCount{0}
-    , nextID{0}
-    , handlers{std::vector<MEventHandler>(maxHandlers, nullptr)}
-    , id_table{std::vector<MEventHandlerID>(maxHandlers, 0)}
+    : nextID{0}
     {
+        handlers.reserve(8);
     }
 
-    void MWindow::executeHandlerChain(const MEvent& ev)
-    {
-        for(size_t i{handlerCount-1};i >= 0;--i)
+    void MWindow::executeHandlerChain(const MEvent& ev) {
+        std::shared_lock lock(handler_lock);
+        
+        for(size_t i{handlers.size()-1};i >= 0;--i)
         {
-            if(handlers[i](ev) == MEventResult::Consumed)
+            if(handlers[i].handler(ev) == MEventResult::Consumed)
                 break;
         }
     }
 
-    MEventHandlerID MWindow::registerEventHandler(MEventHandler ha)
-    {
-        std::lock_guard<std::mutex> lock(consumerLock);
+    MEventHandlerID MWindow::registerEventHandler(MEventHandler ha) {
+        std::unique_lock lock(handler_lock);
+        handlers.push_back(MEventHandlerEntry{nextID, ha});
 
-        if(handlerCount >= maxHandlers)
-        {
-            handlers.push_back(ha);
-            id_table.push_back(nextID++);
-            handlerCount++;
-            maxHandlers++;
-        }
-        else
-        {
-            handlers[handlerCount] = ha;
-            id_table[handlerCount++] = nextID++;
-        }
-        return nextID-1;
+        return nextID++;
     }
+    
+    void MWindow::unregisterEventHandler(MEventHandlerID id) {
+        std::unique_lock lock(handler_lock);
 
-    void MWindow::unregisterEventHandler(MEventHandlerID id)
-    {
-        std::lock_guard<std::mutex> lock(consumerLock);
-        for(size_t i{0};i < handlerCount;++i)
+        for(size_t i{0};i < handlers.size();++i)
         {
-            if(id_table[i] == id)
+            if(handlers[i].id == id)
             {
-                for(size_t j{i};j < handlerCount-1;++j)
-                    handlers[j] = handlers[j+1];
-                
-                for(size_t j{i};j < handlerCount-1;++j)
-                {
-                    id_table[j] = id_table[j+1];
-                }
-                handlerCount--;
-                handlers[handlerCount] = nullptr;
-                return;
+                handlers.erase(handlers.begin() + i);
             }
         }
-        return;
     }
 
 }

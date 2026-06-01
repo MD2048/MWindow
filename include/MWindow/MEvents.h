@@ -65,21 +65,17 @@ namespace MW {
     };
 
 
-    enum class MVisibilility : uint32_t {
-        Shown,
-        Hidden,
-        Minimized
-    };
-
-
     struct MVisibilityChangeEvent {
-        MVisibilility new_visibility;
+        bool isVisible;
+        constexpr MVisibilityChangeEvent(bool visible) noexcept
+            : isVisible(visible)
+        {}
     };
 
     struct MCloseEvent {};
 
     struct MResizeEvent {
-        MSize new_rect;
+        MSize new_size;
     };
 
     struct MMoveEvent {

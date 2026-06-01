@@ -61,7 +61,7 @@ namespace MW
             case MDeviceType::Touchscreen: return MDeviceState{std::in_place_type<MTouchState>};
             case MDeviceType::Gamepad    : return MDeviceState{std::in_place_type<MGamepadState>};
             case MDeviceType::Stylus     : return MDeviceState{std::in_place_type<MStylusState>};
-            default: MDeviceState{std::in_place_type<MStylusState>};
+            default: return MDeviceState{std::in_place_type<MStylusState>};
         }
     }
 

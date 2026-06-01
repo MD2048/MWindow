@@ -12,11 +12,10 @@
 #include "MWindow/MWindowInit.h"
 #include "MWindow/MDef.h"
 #include "MWindow/MRendering.h"
-#include "MWindow/MWindowState.h"
 
 #include <cstdint>
 #include <vector>
-#include <mutex>
+#include <shared_mutex>
 #include <memory>
 #include <optional>
 
@@ -36,13 +35,13 @@ namespace MW {
 
     // Device query
     std::vector<MDeviceInfo>    getConnectedDevices();
-    std::optional<MDeviceState> getDeviceState(MDeviceID id);
+    std::optional<MDeviceState const*> getDeviceState(MDeviceID id);
     bool                        isDeviceConnected(MDeviceID id);
 
     // Monitor query
     std::vector<MMonitor>   getConnectedMonitors();
     std::optional<MMonitor> getMonitor(MMonitorID id);
-    const MMonitor&         getPrimaryMonitor();
+    std::optional<MMonitor> getPrimaryMonitor();
     bool                    isMonitorConnected(MMonitorID id);
 
     float getCursorX();
@@ -53,14 +52,9 @@ namespace MW {
     
     class MWindow {
     private:
-        std::size_t maxHandlers;
-        std::mutex consumerLock;
-        std::vector<MEventHandler> handlers;
-        std::vector<MEventHandlerID> id_table;
-        std::size_t handlerCount;
+        std::shared_mutex handler_lock;
+        std::vector<MEventHandlerEntry> handlers;
         MEventHandlerID nextID;
-
-        MWindowState state;
     protected:
         MWindow();
     public:
@@ -77,7 +71,6 @@ namespace MW {
         virtual void hide()  = 0;
         virtual void close() = 0;
 
-        [[nodiscard]] virtual bool isOpen()    const = 0;
         [[nodiscard]] virtual bool isVisible() const = 0;  // false when minimized
 
         // ── Properties (all logical) ──────────────────────────────────────────
@@ -96,7 +89,7 @@ namespace MW {
         virtual MWindowMode getWindowMode() const = 0;
 
         // Which monitor this window currently lives on (dominant monitor)
-        virtual const MMonitor& getMonitor() const = 0;
+        virtual MMonitorID getCurrentMonitorID() const = 0;
 
         // DPI scale of the current monitor
         virtual float getDpiScale() const = 0;
@@ -106,12 +99,6 @@ namespace MW {
         virtual MSize getPhysicalSize() const = 0;
 
         virtual MRenderSurface getRenderSurface() const = 0;
-
-        // ── Event handlers ────────────────────────────────────────────────────
-        // Newest handler gets called first
-        // Return EventResult::Consumed to stop propagation.
-        virtual MEventHandlerID pushEventHandler(MEventHandler handler) = 0;
-        virtual void popEventHandler(MEventHandlerID id) = 0;
 
         // ── Factory ───────────────────────────────────────────────────────────
         [[nodiscard]] static std::unique_ptr<MWindow> create(const MWindowDesc& desc);

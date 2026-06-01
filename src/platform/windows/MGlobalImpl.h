@@ -8,7 +8,12 @@
 #include "MWindow/MMonitor.h"
 #include "MWindow/MEvents.h"
 #include "MWindow/MWindowInit.h"
-#include "headers/MGlobalBase.h"
+#include "MWindow/MDevices.h"
+
+#include <atomic>
+#include <memory>
+#include <mutex>
+#include <shared_mutex>
 
 #include <vector>
 #include <optional>
@@ -16,17 +21,63 @@
 
 namespace MW {
 
+    std::atomic<bool> setup_finished; // prevents a rare race between NotificationWndProc and enumerateInputDevices
+
     constexpr int WINDOWS_DEVICE_COUNT { 6 };
     constexpr int WINDOWS_MONITOR_COUNT { 4 };
     constexpr int WINDOWS_GLOBAL_HANDLER_COUNT { 4 };
+    constexpr int WINDOWS_WINDOW_COUNT { 4 };
+
+    class MWindowImpl;
 
     class MGlobal {
     private:
         static MGlobal* ptr;
+        
+        struct MWindowEntry {
+            MWindowID    id;
+            void*        hwnd;
+            MWindowImpl* window;
+        };
 
-        MGlobalBase base;
+        struct MEventSlot{
+            MEvent event;
+            bool global;
+            MWindowID id;
+        };
+
+        MInitConfig settings;
+
+        std::size_t mask;
+        alignas(64) std::atomic<std::size_t> head;
+        alignas(64) std::atomic<std::size_t> tail;
+        std::unique_ptr<MEventSlot[]> buffer;
+
+        std::atomic<std::vector<std::pair<MDeviceID, MDeviceState>>*> front_buf;
+        std::atomic<std::vector<std::pair<MDeviceID, MDeviceState>>*> back_buf;
+
+        std::shared_mutex        dev_info_lock;
+        std::vector<MDeviceInfo> devices;
+
+        std::vector<std::pair<MDeviceID, MDeviceState>> statebuf1;
+        std::vector<std::pair<MDeviceID, MDeviceState>> statebuf2;
+        MDeviceID nextDevID;
+
+        std::shared_mutex     monitor_lock;
+        std::vector<MMonitor> monitors;
+        MMonitorID nextMonID;
+
+        std::shared_mutex         window_lock;
+        std::vector<MWindowEntry> windows;
+        MWindowID                 nextWinID;
+
+        std::mutex handler_lock;
+        std::vector<MEventHandlerEntry> global_handlers;
+        MEventHandlerID nextHandlerID;
+
         std::vector<std::pair<void*, MMonitorID>> monitorHandles;
         std::vector<std::pair<void*, MDeviceID>> deviceHandles;
+
         void* notificationHWND;
 
         MGlobal(const MInitConfig& config);
@@ -37,10 +88,14 @@ namespace MW {
         void enumerateInputDevices();
         void enumerateMonitors();
 
+        void consumeAll();
+        void switchBuffers();
+        void executeGlobalHandlerChain(const MEvent& ev);
+
         std::vector<std::pair<MDeviceID, MDeviceState>>* getStatePtr() const;
     public:
         static MGlobal* init(const MInitConfig& config = {});
-        static MGlobal& Get();
+        static MGlobal* Get();
         static void shutdown();
 
         ~MGlobal();
@@ -48,11 +103,14 @@ namespace MW {
         // Drains the event queue, walks each event through registered handler chains
         void poll();
 
+        // Event queue push
+        bool push(MEventSlot&& ev); 
+
         //bool isRunning();
 
         // Device query
         std::vector<MDeviceInfo>    getConnectedDevices();
-        std::optional<MDeviceState> getDeviceState(MDeviceID id);
+        std::optional<MDeviceState const*> getDeviceState(MDeviceID id);
         bool                        isDeviceConnected(MDeviceID id);
 
         // Monitor query
@@ -61,8 +119,22 @@ namespace MW {
         const MMonitor&         getPrimaryMonitor();
         bool                    isMonitorConnected(MMonitorID id);
 
+
         MEventHandlerID registerGlobalEventHandler(MEventHandler ha);
         void unregisterGlobalEventHandler(MEventHandlerID id);
+
+        MWindowID registerWindow(void* hwnd, MWindowImpl* ptr);
+        void unregisterWindow(MWindowID id);
+
+        std::optional<MWindowID> idFromHWND(void* hwnd);
+        std::optional<MWindowImpl*> ptrFromHWND(void* hwnd);
+        std::optional<MWindowImpl*> ptrFromID(MWindowID id);
+
+        std::optional<MMonitorID> monIDFromHandle(void* hMon);
+        std::optional<MMonitor>  monitorFromHandle(void* hMon);
+        std::optional<MMonitor> monitorFromID(MMonitorID id);
+
+        MMonitor monitorFromPoint(MPoint pt);
 
         float getCursorX();
         float getCursorY();
