@@ -123,16 +123,16 @@ inline MRect resolveWindowRect(MRect rect, const std::vector<MMonitor>& monitors
     return rect;
 }
 
-inline MDeviceType toMDeviceType(const RAWINPUTDEVICELIST& entry) {
-    switch (entry.dwType) {
+inline MDeviceType toMDeviceType(HANDLE hDevice) {
+    RID_DEVICE_INFO info{};
+    info.cbSize = sizeof(info);
+    UINT size = sizeof(info);
+    GetRawInputDeviceInfoW(hDevice, RIDI_DEVICEINFO, &info, &size);
+
+    switch (info.dwType) {
         case RIM_TYPEKEYBOARD: return MDeviceType::Keyboard;
         case RIM_TYPEMOUSE:    return MDeviceType::Mouse;
         case RIM_TYPEHID: {
-            RID_DEVICE_INFO info{};
-            info.cbSize = sizeof(info);
-            UINT size = sizeof(info);
-            GetRawInputDeviceInfoW(entry.hDevice, RIDI_DEVICEINFO, &info, &size);
-
             switch (info.hid.usUsagePage) {
                 case 0x01: // Generic Desktop
                     switch (info.hid.usUsage) {

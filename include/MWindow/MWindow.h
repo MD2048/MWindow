@@ -66,6 +66,8 @@ namespace MW {
 
         virtual ~MWindow() = default;
 
+        virtual MWindowID getId() const = 0;
+
         // ── Lifecycle ─────────────────────────────────────────────────────────
         virtual void show()  = 0;
         virtual void hide()  = 0;

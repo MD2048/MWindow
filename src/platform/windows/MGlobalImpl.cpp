@@ -23,9 +23,10 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 
         case WM_CLOSE:
             global->push({MW::MEvent{std::in_place_type<MW::MCloseEvent>}, false, global->idFromHWND(hwnd).value()});
-            return 0;
+            return 1;
         case WM_DESTROY:
-            return 0; // MWindowImpl::close() has been already called at this point
+            PostQuitMessage(0);
+            return 1; // MWindowImpl::close() has been already called at this point
 
         case WM_SIZE:
             auto* mw = global->ptrFromHWND(hwnd).value();
@@ -36,36 +37,71 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             switch(flag)
             {
                 case SIZE_MINIMIZED:
-                    state->desc.visible=false;
-                    global->push({MW::MEvent{std::in_place_type<MW::MVisibilityChangeEvent>, MW::MVisibilityChangeEvent{false}},
-                         false, global->idFromHWND(hwnd).value()});
-                    return 0;
+                    if(state->desc.visible)
+                    {
+                        state->desc.visible = false;
+
+                        global->push({MW::MEvent{std::in_place_type<MW::MVisibilityChangeEvent>, MW::MVisibilityChangeEvent{false}},
+                             false, global->idFromHWND(hwnd).value()});
+                    }
 
                 case SIZE_RESTORED:
                 case SIZE_MAXIMIZED:
-                    state->desc.visible=true;
+                    if(!state->desc.visible)
+                    {
+                        state->desc.visible=true;
+                        global->push({MW::MEvent{std::in_place_type<MW::MVisibilityChangeEvent>, MW::MVisibilityChangeEvent{true}},
+                            false, global->idFromHWND(hwnd).value()});
+            
+                    }
             }
-            global->push({MW::MEvent{std::in_place_type<MW::MVisibilityChangeEvent>, MW::MVisibilityChangeEvent{true}},
-                         false, global->idFromHWND(hwnd).value()});
             
-            float dpi = global->getMonitor(mw->getCurrentMonitorID()).value().dpiScale;
-            float w = static_cast<float>(LOWORD(lParam))/dpi;
-            float h = static_cast<float>(HIWORD(lParam))/dpi;
+            RECT& r {state->currentRect};
+            LONG w = LOWORD(lParam);
+            LONG h = HIWORD(lParam);
 
-            if()
-            
-            global->push({MW::MEvent{std::in_place_type<MW::MResizeEvent>, MW::MResizeEvent{}},
+            if(!(r.left-r.right == w && r.top-r.bottom == h))
+            {
+                r.right += w - r.right;
+                r.bottom += h - r.bottom;
+
+                MMonitor new_mon = global->monitorFromHandle(MonitorFromRect(&state->currentRect, MONITOR_DEFAULTTONEAREST)).value();
+                state->desc.monitor = new_mon.id;
+                state->desc.rect.width = (float)w / new_mon.dpiScale;
+                state->desc.rect.height = (float)h / new_mon.dpiScale;
+                global->push({MW::MEvent{std::in_place_type<MW::MResizeEvent>, MW::MResizeEvent{state->desc.rect.size()}},
                          false, global->idFromHWND(hwnd).value()});
+            }
             
+            return 1;
 
         case WM_MOVE:
-            // LOWORD/HIWORD(lParam) = physical x/y
-            // → update state.topLeft (divide by scale)
-            // → push MWindowMoveEvent
+            auto* mw = global->ptrFromHWND(hwnd).value();
+            auto* state = mw->getBackStatePtr();
+
+            RECT& r {state->currentRect};
+            LONG x = LOWORD(lParam);
+            LONG y = HIWORD(lParam);
+
+            if(!(r.left == x && r.top == y))
+            {
+                LONG dfx = x - r.left;
+                LONG dfy = y - r.top;
+                r.left += dfx; r.right  += dfx;
+                r.top  += dfy; r.bottom += dfy;
+
+                MMonitor new_mon = global->monitorFromHandle(MonitorFromRect(&state->currentRect, MONITOR_DEFAULTTONEAREST)).value();
+                state->desc.monitor = new_mon.id;
+                state->desc.rect.x = (float)x / new_mon.dpiScale;
+                state->desc.rect.y = (float)y / new_mon.dpiScale;
+                global->push({MW::MEvent{std::in_place_type<MW::MMoveEvent>, MW::MMoveEvent{state->desc.rect.topLeft()}},
+                         false, global->idFromHWND(hwnd).value()});
+            }
+
+            return 1;
 
         case WM_WINDOWPOSCHANGED:
-            // Fires after any size/position/zorder change
-            // → update state.monitorId (MonitorFromWindow)
+            break;
 
         case WM_DPICHANGED:
             // HIWORD(wParam) = new DPI
@@ -73,21 +109,85 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             // → update state.dpiScale
             // → SetWindowPos with suggested rect
             // → push MWindowDpiChangedEvent
+            float dpiScale = (float)LOWORD(wParam) / 96.0f;
+            const RECT* suggested = reinterpret_cast<const RECT*>(lParam);
+            
+            auto* mw = global->ptrFromHWND(hwnd).value();
+            auto* state = mw->getBackStatePtr();
+
+            SetWindowPos(hwnd, nullptr, 
+                suggested->left, suggested->top,
+                suggested->right - suggested->left,
+                suggested->bottom - suggested->top,
+                SWP_NOZORDER | SWP_NOACTIVATE
+            );
+
+            state->currentRect = *suggested;
+            MRect mr = RECTToMRect(state->currentRect, dpiScale);
+            if(mr.topLeft() != state->desc.rect.topLeft())
+            {
+                global->push({MW::MEvent{std::in_place_type<MW::MMoveEvent>, MW::MMoveEvent{mr.topLeft()}},
+                         false, global->idFromHWND(hwnd).value()});
+                state->desc.rect.x = mr.x;
+                state->desc.rect.y = mr.y;
+            }
+            if(mr.size() != state->desc.rect.size())
+            {
+                global->push({MW::MEvent{std::in_place_type<MW::MResizeEvent>, MW::MResizeEvent{mr.size()}},
+                         false, global->idFromHWND(hwnd).value()});
+                state->desc.rect.width  = mr.width;
+                state->desc.rect.height = mr.height;
+            }
+
+            state->desc.monitor = global->monIDFromHandle(MonitorFromRect(reinterpret_cast<LPCRECT>(suggested), MONITOR_DEFAULTTONEAREST)).value();
+
+            return 1;
 
         case WM_SETFOCUS:
-            // → push MWindowFocusEvent{ true }
+            auto* mw = global->ptrFromHWND(hwnd).value();
+            auto* state = mw->getBackStatePtr();
+            
+            if(state->focused != true)
+            {
+                state->focused = true;
+                global->push({MW::MEvent{std::in_place_type<MW::MFocusChangeEvent>, MW::MFocusChangeEvent{true}},
+                            false, global->idFromHWND(hwnd).value()});   
+            }
+
+            return 1;
 
         case WM_KILLFOCUS:
-            // → push MWindowFocusEvent{ false }
+            auto* mw = global->ptrFromHWND(hwnd).value();
+            auto* state = mw->getBackStatePtr();
+            
+            if(state->focused != false)
+            {
+                state->focused = false;
+                global->push({MW::MEvent{std::in_place_type<MW::MFocusChangeEvent>, MW::MFocusChangeEvent{false}},
+                            false, global->idFromHWND(hwnd).value()});   
+            }
+
+            return 1;
 
         case WM_SHOWWINDOW:
-            // wParam = TRUE/FALSE
-            // → update state.visible
-            // → push MWindowVisibilityEvent
+            bool vis = wParam;
+
+            auto* mw = global->ptrFromHWND(hwnd).value();
+            auto* state = mw->getBackStatePtr();
+            
+            if(state->desc.visible != vis)
+            {
+                state->desc.visible = vis;
+                global->push({MW::MEvent{std::in_place_type<MW::MVisibilityChangeEvent>, MW::MVisibilityChangeEvent{vis}},
+                            false, global->idFromHWND(hwnd).value()});
+            }
+
+            return 1;
 
         case WM_NCHITTEST:
             // Needed if you implement custom chrome / drag regions
             // → return HTCLIENT or custom regions
+            break;
 
         case WM_ERASEBKGND:
             // Return 1 to prevent GDI clearing the window each frame
@@ -96,13 +196,38 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         default:
             return DefWindowProc(hwnd, uMsg, wParam, lParam);
     }
-    return 0;
+    return DefWindowProc(hwnd, uMsg, wParam, lParam);
 }
 
 LRESULT CALLBACK NotificationWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
-    auto* win = reinterpret_cast<MW::MWindowImpl*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
-    if (!win) return DefWindowProc(hwnd, uMsg, wParam, lParam);
+    auto* global = reinterpret_cast<MW::MGlobal*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
+    if (!global) return DefWindowProc(hwnd, uMsg, wParam, lParam);
+
+    switch(uMsg)
+    {
+        case WM_INPUT:
+            // Per-device keyboard, mouse, touch state updates
+            // → update MKeyboardState / MMouseState / MTouchState
+            // → push MKeyEvent, MCharEvent, MMouseMoveEvent, etc.
+        case WM_INPUT_DEVICE_CHANGE:
+            if(wParam == GIDC_ARRIVAL)
+                global->onDeviceConnected(reinterpret_cast<void*>(lParam));
+            else
+                global->onDeviceDisconnected(reinterpret_cast<void*>(lParam));
+            
+            return 1;
+
+        // ── Monitor changes ───────────────────────────────────────────────
+        case WM_DISPLAYCHANGE:
+            // Resolution or bit depth changed
+            // → re-enumerate monitors
+            // → push MMonitorChangedEvent (if you have one)
+
+        case WM_DEVICECHANGE:
+            // Covers monitor hotplug (connect/disconnect)
+            // → re-enumerate monitors
+    }
 }
 
 namespace MW {
@@ -194,7 +319,7 @@ namespace MW {
     }
 
     std::optional<MDeviceState const*> MGlobal::getDeviceState(MDeviceID id) {
-        auto* ptr = getStatePtr();
+        auto* ptr = getFrontStatePtr();
         auto it   = std::find_if(ptr->begin(), ptr->end(), [id](const std::pair<MDeviceID, MDeviceState>& p){
                                                                 return id == p.first;
                                                             });
@@ -241,7 +366,8 @@ namespace MW {
                                 });
     }
 
-    std::vector<std::pair<MDeviceID, MDeviceState>>* MGlobal::getStatePtr() const { return front_buf.load(std::memory_order_acquire); }
+    std::vector<std::pair<MDeviceID, MDeviceState>>* MGlobal::getFrontStatePtr() const { return front_buf.load(std::memory_order_acquire); }
+    std::vector<std::pair<MDeviceID, MDeviceState>>* MGlobal::getBackStatePtr()  const { return back_buf.load(std::memory_order_acquire); }
 
     MWindowID MGlobal::registerWindow(void* hwnd, MWindowImpl* ptr) {
         std::unique_lock lock(window_lock);
@@ -481,11 +607,11 @@ namespace MW {
         std::vector<RAWINPUTDEVICELIST> list(count);
         GetRawInputDeviceList(list.data(), &count, sizeof(RAWINPUTDEVICELIST));
 
-        auto* buf { back_buf.load(std::memory_order_acquire) };
+        auto* buf { getBackStatePtr() };
         for (auto& entry : list)
         {
             MDeviceInfo di{};
-            di.type = toMDeviceType(entry);
+            di.type = toMDeviceType(entry.hDevice);
             
             if(di.type == MDeviceType::Unknown)
                 continue;
@@ -598,5 +724,65 @@ namespace MW {
             },
             reinterpret_cast<LPARAM>(this)
         );
-}
+    }
+
+    void MGlobal::onDeviceConnected(void* hDevice) {
+        std::unique_lock lock(dev_info_lock);
+        MDeviceInfo info{0};
+
+        info.type = toMDeviceType(hDevice);
+        if(info.type == MDeviceType::Unknown)
+            return;
+        info.name = GetDeviceName(hDevice);
+        auto it = std::find_if(deviceHandles.begin(),deviceHandles.end(), [hDevice](std::pair<void*,MDeviceInfo>& p)
+                                                                            {
+                                                                                return p.first == hDevice;
+                                                                            });
+        auto* state = getBackStatePtr();
+        if(it == deviceHandles.end())
+        {    
+            info.id = nextDevID++;
+            deviceHandles.push_back({reinterpret_cast<void*>(hDevice), info});
+        }
+        else
+        {
+            info.id = (*it).second.id;
+
+            auto* state = getBackStatePtr();
+            auto iter = std::find_if(state->begin(),state->end(), [&info](std::pair<MDeviceID,MDeviceState>& p)
+                                                                {
+                                                                    return p.first == info.id;
+                                                                });
+            if(iter != state->end())
+                return;
+        }
+
+        MDeviceState st { zeroInit(info.type) };
+        if(info.type == MDeviceType::Mouse)
+        {
+            POINT p{};
+            if (GetCursorPos(&p)) {
+                HMONITOR hMon = MonitorFromPoint(p, MONITOR_DEFAULTTONEAREST);
+                UINT dpiX, dpiY;
+                GetDpiForMonitor(hMon, MDT_EFFECTIVE_DPI, &dpiX, &dpiY);
+                float scale = dpiX / 96.f;
+
+                std::get<MMouseState>(st).x = p.x / scale;
+                std::get<MMouseState>(st).y = p.y / scale;
+            }
+        }
+
+        state->push_back({info.id,})
+
+        
+    }
+    void MGlobal::onDeviceDisconnected(void* hDevice) {
+        std::unique_lock lock(dev_info_lock);
+        auto it = std::find_if(deviceHandles.begin(),deviceHandles.end(), [hDevice](std::pair<void*,MDeviceInfo>& p)
+                                                                            {
+                                                                                return p.first == hDevice;
+                                                                            });
+        if(it == deviceHandles.end())
+            return;
+    }
 }

@@ -47,6 +47,7 @@ namespace MW
         constexpr MPoint topRight() const noexcept { return { x + width, y }; }
         constexpr MPoint bottomLeft() const noexcept { return {x, y + height}; }
         constexpr MPoint bottomRight() const noexcept { return { x + width, y + height }; }
+        constexpr MPoint middle() const noexcept { return { x - (width/2), y - (height/2) }; }
         constexpr MSize  size() const noexcept { return { width, height }; }
         constexpr bool   contains(MPoint p) const noexcept { return (x <= p.x) && (p.x < x+width) && (y <= p.y) && (p.y < y+height); }
     };   

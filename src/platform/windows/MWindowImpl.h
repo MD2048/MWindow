@@ -20,12 +20,13 @@ namespace MW {
     {
     public:
         struct MWindowState {
-            MWindowDesc desc         {};
+            bool focused             = false;
             DWORD currentStyle       = 0;
             DWORD preFullScreenStyle = 0;      // saved before entering fullscreen
             RECT  currentRect        {};       // this avoids comparing floats
             RECT  preFullscreenRect  {};       // not adjusted physical
                                                // exstyle is 0 except in fullscreen: WS_EX_APPWINDOW
+            MWindowDesc desc         {};
         };
     private:
         MGlobal* global;
@@ -43,6 +44,8 @@ namespace MW {
         MWindowImpl(const MWindowDesc& desc);
 
         ~MWindowImpl() override;
+
+        MWindowID getId() const override;
 
         MWindowState const* getFrontStatePtr() const;
         MWindowState* getBackStatePtr() const;

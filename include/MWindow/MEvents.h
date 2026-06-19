@@ -64,6 +64,15 @@ namespace MW {
         KPSubtract, KPAdd, KPEnter,
     };
 
+    enum class MDisplayChange {
+        NameChange,
+        RectChange,
+        DPIChange,
+        PrimaryChange,
+        VideModeChange,
+        HDRChange
+    };
+
 
     struct MVisibilityChangeEvent {
         bool isVisible;
@@ -82,13 +91,13 @@ namespace MW {
         MPoint new_pos;
     };
 
-    struct MFocusGainEvent {};
+    struct MFocusChangeEvent {
+        bool focused;
+    };
 
-    struct MFocusLoseEvent {};
-
-    struct MDPIChangeEvent {
-        float oldDPI;
-        float newDPI;
+    struct MMonitorChangeEvent { // Not to confuse with displaychange!!!
+        MMonitorID old_mon;
+        MMonitorID new_id;
     };
 
     struct MKeyPressEvent {
@@ -185,6 +194,19 @@ namespace MW {
         MDeviceInfo dev_info;
     };
 
+    struct MDisplaySettingChangeEvent {
+        MDisplayChange change;
+        MMonitorID id;
+    };
+
+    struct MDisplayConnectedEvent {
+        MMonitorID id;
+    };
+
+    struct MDisplayDisconnectedEvent {
+        MMonitorID id;
+    };
+
     using MEvent = std::variant <
             // Visibibility
             MVisibilityChangeEvent,
@@ -192,9 +214,8 @@ namespace MW {
             MCloseEvent,
             MResizeEvent,
             MMoveEvent,
-            MFocusGainEvent,
-            MFocusLoseEvent,
-            MDPIChangeEvent,
+            MFocusChangeEvent,
+            MMonitorChangeEvent,
             // Keyboard
             MKeyPressEvent,
             MKeyReleaseEvent,
@@ -214,7 +235,11 @@ namespace MW {
 
             //Devices
             MDeviceConnectedEvent,
-            MDeviceDisconnectedEvent
+            MDeviceDisconnectedEvent,
+            // Monitors
+            MDisplaySettingChangeEvent,
+            MDisplayConnectedEvent,
+            MDisplayDisconnectedEvent
             // Drop - cut from 1. version
             // MDropEnterEvent,
             // MDropMoveEvent,

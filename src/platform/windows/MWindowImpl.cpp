@@ -116,6 +116,10 @@ namespace MW
         close();
     }
 
+    MWindowID getId() const {
+        return id;
+    }
+
     MWindowImpl::MWindowState const* MWindowImpl::getFrontStatePtr() const {
         return front_state.load(std::memory_order_acquire);
     }

@@ -92,7 +92,8 @@ namespace MW {
         void switchBuffers();
         void executeGlobalHandlerChain(const MEvent& ev);
 
-        std::vector<std::pair<MDeviceID, MDeviceState>>* getStatePtr() const;
+        std::vector<std::pair<MDeviceID, MDeviceState>>* getFrontStatePtr() const;
+        std::vector<std::pair<MDeviceID, MDeviceState>>* getBackStatePtr()  const;
     public:
         static MGlobal* init(const MInitConfig& config = {});
         static MGlobal* Get();
@@ -141,6 +142,9 @@ namespace MW {
 
         // Key state query for between-event polling
         bool isKeyHeld(MKey key);
+
+        void onDeviceConnected(void* hDevice);
+        void onDeviceDisconnected(void* hDevice);
     };
 }
 
