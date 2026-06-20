@@ -15,6 +15,7 @@
     #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#include <shellscalingapi.h>
 #include <dxgi1_6.h>
 
 using namespace MW;
@@ -123,68 +124,108 @@ inline MRect resolveWindowRect(MRect rect, const std::vector<MMonitor>& monitors
     return rect;
 }
 
-inline MDeviceType toMDeviceType(HANDLE hDevice) {
-    RID_DEVICE_INFO info{};
-    info.cbSize = sizeof(info);
-    UINT size = sizeof(info);
-    GetRawInputDeviceInfoW(hDevice, RIDI_DEVICEINFO, &info, &size);
 
-    switch (info.dwType) {
-        case RIM_TYPEKEYBOARD: return MDeviceType::Keyboard;
-        case RIM_TYPEMOUSE:    return MDeviceType::Mouse;
-        case RIM_TYPEHID: {
-            switch (info.hid.usUsagePage) {
-                case 0x01: // Generic Desktop
-                    switch (info.hid.usUsage) {
-                        case 0x04: return MDeviceType::Gamepad;    // Joystick
-                        case 0x05: return MDeviceType::Gamepad;    // Gamepad
-                        case 0x08: return MDeviceType::Mouse;      // Multi-axis (trackball etc)
-                        default:   return MDeviceType::Unknown;
-                    }
-                case 0x0D: // Digitizer
-                    switch (info.hid.usUsage) {
-                        case 0x01: return MDeviceType::Stylus;      // Digitizer
-                        case 0x02: return MDeviceType::Stylus;      // Pen
-                        case 0x04: return MDeviceType::Touchscreen; // Touchscreen
-                        case 0x05: return MDeviceType::Touchscreen; // Touch pad
-                        default:   return MDeviceType::Unknown;
-                    }
-                default: return MDeviceType::Unknown;
-            }
-        }
-        default: return MDeviceType::Unknown;
-    }
-}
-
-inline std::string GetDeviceName(HANDLE device)
+inline void handleToMDeviceInfo(HANDLE hDevice, MDeviceInfo& info) // NOTE: id is not filled by this function !
 {
+    // name
     UINT size = 0;
 
     GetRawInputDeviceInfoA(
-        device,
+        hDevice,
         RIDI_DEVICENAME,
         nullptr,
         &size);
 
     if (size == 0)
-        return {};
-
-    std::string name(size, '\0');
-
-    if (GetRawInputDeviceInfoA(
-            device,
-            RIDI_DEVICENAME,
-            name.data(),
-            &size) == static_cast<UINT>(-1))
+        info.name = {};
+    else
     {
-        return {};
+        info.name.resize(size);
+        if (GetRawInputDeviceInfoA(
+            hDevice,
+            RIDI_DEVICENAME,
+            info.name.data(),
+            &size) == static_cast<UINT>(-1))
+
+            info.name = {};
+
+        else if (!info.name.empty())
+        {
+            if(info.name.back() == '\0')
+                info.name.pop_back();
+        }
     }
+    // type
 
-    // remove trailing null
-    if (!name.empty() && name.back() == '\0')
-        name.pop_back();
+    RID_DEVICE_INFO rdinfo{};
+    rdinfo.cbSize = sizeof(rdinfo);
+    size = sizeof(rdinfo);
+    GetRawInputDeviceInfoW(hDevice, RIDI_DEVICEINFO, &rdinfo, &size);
 
-    return name;
+    switch (rdinfo.dwType) {
+        case RIM_TYPEKEYBOARD: info.type = MDeviceType::Keyboard;  break;
+        case RIM_TYPEMOUSE:    info.type = MDeviceType::Mouse; break;
+        case RIM_TYPEHID: {
+            switch (rdinfo.hid.usUsagePage) {
+                case 0x01: // Generic Desktop
+                    switch (rdinfo.hid.usUsage) {
+                        case 0x04: info.type = MDeviceType::Gamepad;   break;  // Joystick
+                        case 0x05: info.type = MDeviceType::Gamepad;  break;   // Gamepad
+                        case 0x08: info.type = MDeviceType::Mouse;  break;     // Multi-axis (trackball etc)
+                        default:   info.type = MDeviceType::Unknown; break;
+                    }
+                case 0x0D: // Digitizer
+                    switch (rdinfo.hid.usUsage) {
+                        case 0x01: info.type = MDeviceType::Stylus; break;      // Digitizer
+                        case 0x02: info.type = MDeviceType::Stylus;  break;     // Pen
+                        case 0x04: info.type = MDeviceType::Touchscreen; break; // Touchscreen
+                        case 0x05: info.type = MDeviceType::Touchscreen; break; // Touch pad
+                        default:   info.type = MDeviceType::Unknown; break;
+                    }
+                default: info.type = MDeviceType::Unknown; break;
+            }
+        }
+        default: info.type = MDeviceType::Unknown; break;
+    }
+}
+
+template<class... Ts>
+struct Overloaded : Ts...
+{
+    using Ts::operator()...;
+};
+
+template<class... Ts>
+Overloaded(Ts...) -> Overloaded<Ts...>;
+
+inline void initializeDeviceState(MDeviceState& st)
+{
+    std::visit(
+        Overloaded{
+            [](MKeyboardState& state) {},
+            [](MMouseState& state)
+            {
+                POINT p{};
+                if (GetCursorPos(&p)) {
+                    HMONITOR hMon = MonitorFromPoint(p, MONITOR_DEFAULTTONEAREST);
+                    UINT dpiX, dpiY;
+                    GetDpiForMonitor(hMon, MDT_EFFECTIVE_DPI, &dpiX, &dpiY);
+                    float scale = dpiX / 96.f;
+                    state.p.x = p.x / scale;
+                    state.p.y = p.y / scale;
+                }
+            },
+            [](MTouchState& state) {},
+            [](MGamepadState& state) {},
+            [](MStylusState& state) {}
+        },
+        st
+    );
+}
+
+inline MKey translateVK(USHORT vk)
+{
+    
 }
 
 inline uint32_t dmBitsPerChannel(DWORD dmBitsPerPel) {

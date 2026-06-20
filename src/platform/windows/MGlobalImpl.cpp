@@ -1,6 +1,7 @@
 #include "windows/MGlobalImpl.h"
 #include "windows/MWindowImpl.h"
 #include "windows/MWindowsHelpers.h"
+#include "windows/MKeyTranslation.h"
 
 #ifndef NOMINMAX
     #define NOMINMAX
@@ -10,6 +11,7 @@
 #endif
 #include <windows.h>
 #include <shellscalingapi.h>
+#include <Dbt.h>
 
 #include <limits>
 #include <cassert>
@@ -19,18 +21,24 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
     auto* global = reinterpret_cast<MW::MGlobal*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
     if (!global) return DefWindowProc(hwnd, uMsg, wParam, lParam);
 
+    auto* mw = global->ptrFromHWND(hwnd).value();
+    auto* state = mw->getBackStatePtr();
+
     switch (uMsg) {
 
         case WM_CLOSE:
-            global->push({MW::MEvent{std::in_place_type<MW::MCloseEvent>}, false, global->idFromHWND(hwnd).value()});
+        {
+            global->push({MW::MEvent{std::in_place_type<MW::MCloseRequestEvent>}, false, global->idFromHWND(hwnd).value()});
             return 1;
+        }
         case WM_DESTROY:
+        {
             PostQuitMessage(0);
             return 1; // MWindowImpl::close() has been already called at this point
+        }
 
         case WM_SIZE:
-            auto* mw = global->ptrFromHWND(hwnd).value();
-            auto* state = mw->getBackStatePtr();
+        {
             // LOWORD/HIWORD(lParam) = physical w/h
             UINT flag = (UINT)wParam;
 
@@ -74,11 +82,9 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             }
             
             return 1;
-
+        }
         case WM_MOVE:
-            auto* mw = global->ptrFromHWND(hwnd).value();
-            auto* state = mw->getBackStatePtr();
-
+        {
             RECT& r {state->currentRect};
             LONG x = LOWORD(lParam);
             LONG y = HIWORD(lParam);
@@ -99,11 +105,12 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             }
 
             return 1;
-
+        }
         case WM_WINDOWPOSCHANGED:
             break;
 
         case WM_DPICHANGED:
+        {
             // HIWORD(wParam) = new DPI
             // lParam = suggested physical RECT
             // → update state.dpiScale
@@ -111,9 +118,6 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             // → push MWindowDpiChangedEvent
             float dpiScale = (float)LOWORD(wParam) / 96.0f;
             const RECT* suggested = reinterpret_cast<const RECT*>(lParam);
-            
-            auto* mw = global->ptrFromHWND(hwnd).value();
-            auto* state = mw->getBackStatePtr();
 
             SetWindowPos(hwnd, nullptr, 
                 suggested->left, suggested->top,
@@ -142,11 +146,9 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             state->desc.monitor = global->monIDFromHandle(MonitorFromRect(reinterpret_cast<LPCRECT>(suggested), MONITOR_DEFAULTTONEAREST)).value();
 
             return 1;
-
+        }
         case WM_SETFOCUS:
-            auto* mw = global->ptrFromHWND(hwnd).value();
-            auto* state = mw->getBackStatePtr();
-            
+        {
             if(state->focused != true)
             {
                 state->focused = true;
@@ -155,11 +157,9 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             }
 
             return 1;
-
+        }
         case WM_KILLFOCUS:
-            auto* mw = global->ptrFromHWND(hwnd).value();
-            auto* state = mw->getBackStatePtr();
-            
+        {
             if(state->focused != false)
             {
                 state->focused = false;
@@ -168,12 +168,10 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             }
 
             return 1;
-
+        }
         case WM_SHOWWINDOW:
+        {
             bool vis = wParam;
-
-            auto* mw = global->ptrFromHWND(hwnd).value();
-            auto* state = mw->getBackStatePtr();
             
             if(state->desc.visible != vis)
             {
@@ -183,12 +181,11 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             }
 
             return 1;
-
+        }
         case WM_NCHITTEST:
             // Needed if you implement custom chrome / drag regions
             // → return HTCLIENT or custom regions
             break;
-
         case WM_ERASEBKGND:
             // Return 1 to prevent GDI clearing the window each frame
             return 1;
@@ -207,37 +204,286 @@ LRESULT CALLBACK NotificationWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
     switch(uMsg)
     {
         case WM_INPUT:
-            // Per-device keyboard, mouse, touch state updates
-            // → update MKeyboardState / MMouseState / MTouchState
-            // → push MKeyEvent, MCharEvent, MMouseMoveEvent, etc.
+        {
+            UINT size = 0;
+            GetRawInputData(
+                reinterpret_cast<HRAWINPUT>(lParam),
+                RID_INPUT, nullptr, &size, sizeof(RAWINPUTHEADER));
+
+            // Stack allocate for small inputs, heap for large HID reports
+            std::vector<BYTE> buf(size);
+            if (GetRawInputData(
+                    reinterpret_cast<HRAWINPUT>(lParam),
+                    RID_INPUT, buf.data(), &size, sizeof(RAWINPUTHEADER)) != size)
+                return 0;
+
+            auto* raw = reinterpret_cast<RAWINPUT*>(buf.data());
+
+            auto id = global->devIDFromHandle(raw->header.hDevice).value();
+            
+            uint64_t timestamp_ms = static_cast<uint64_t>(GetMessageTime());
+
+            switch (raw->header.dwType) {
+
+                case RIM_TYPEKEYBOARD: {
+                    const auto& kb = raw->data.keyboard;
+
+                    MKey key = translateMakeCode(kb.MakeCode,kb.Flags & RI_KEY_E0);
+
+                    // ── Update keyboard device state ──────────────────────────
+                    auto* f_state = global->getBackStatePtr();
+                    auto it = std::find_if(f_state->begin(),f_state->end(),
+                            [id](std::pair<MDeviceID, MDeviceState>& p)
+                            { return id == p.first; }
+                        );
+
+                    if(it == f_state->end()) break;
+
+                    auto& kbs = std::get<MKeyboardState>((*it).second);
+                    bool pressed = !(kb.Flags & RI_KEY_BREAK);
+                    kbs.held.set(static_cast<size_t>(key), pressed);
+                    kbs.mods.update(key,pressed);
+
+                    // ── Push event ────────────────────────────────────────────
+                    if (pressed)
+                        global->push({MKeyPressEvent{ timestamp_ms, id,
+                            key, kbs.mods},true,0});
+                    else
+                        global->push({MKeyReleaseEvent{ timestamp_ms, id,
+                            key, kbs.mods},true,0});
+                    break;
+                }
+
+                // ── Mouse ─────────────────────────────────────────────────────
+                case RIM_TYPEMOUSE: {
+                    const auto& ms = raw->data.mouse;
+
+                    auto* f_state = global->getBackStatePtr();
+                    auto it = std::find_if(f_state->begin(),f_state->end(),
+                            [id](std::pair<MDeviceID, MDeviceState>& p)
+                            { return id == p.first; }
+                        );
+
+                    if(it == f_state->end()) break;
+
+                    auto& msst = std::get<MMouseState>((*it).second);
+
+                    // ── Movement ──────────────────────────────────────────────
+                    // MOUSE_MOVE_RELATIVE — lLastX/Y are deltas (most mice)
+                    // MOUSE_MOVE_ABSOLUTE — lLastX/Y are absolute in [0, 65535]
+                    //                       (touch pads, some tablet mice)
+                    if (ms.lLastX != 0 || ms.lLastY != 0) {
+                        float dx, dy;
+
+                        if (ms.usFlags & MOUSE_MOVE_ABSOLUTE) {
+                            // Normalize [0,65535] → virtual desktop physical coords
+                            bool isVirtualDesktop = (ms.usFlags & MOUSE_VIRTUAL_DESKTOP);
+                            int desktopW = GetSystemMetrics(isVirtualDesktop ? SM_CXVIRTUALSCREEN : SM_CXSCREEN);
+                            int desktopH = GetSystemMetrics(isVirtualDesktop ? SM_CYVIRTUALSCREEN : SM_CYSCREEN);
+
+                            float physX = (ms.lLastX  / 65535.f) * desktopW;
+                            float physY = (ms.lLastY  / 65535.f) * desktopH;
+
+                            POINT p{ (LONG)physX, (LONG)physY };
+                            HMONITOR hMon = MonitorFromPoint(p, MONITOR_DEFAULTTONEAREST);
+                            float scale   = global->monitorFromHandle(hMon).value().dpiScale;
+
+                            float newX = physX / scale;
+                            float newY = physY / scale;
+
+                            dx = newX - msst.p.x;
+                            dy = newY - msst.p.y;
+                            msst.p.x = newX;
+                            msst.p.y = newY;
+                        } else {
+                            POINT cursor{};
+                            GetCursorPos(&cursor);
+                            HMONITOR hMon = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
+                            float scale   = global->monitorFromHandle(hMon).value().dpiScale;
+
+                            dx = ms.lLastX / scale;
+                            dy = ms.lLastY / scale;
+                            msst.p.x += dx;
+                            msst.p.y += dy;
+                        }
+
+                        global->push({MMouseMoveEvent{ timestamp_ms, id, 
+                            msst.p, dx, dy},true,0});
+                    }
+
+                    // usButtonFlags is a bitmask — multiple buttons can change in one message
+                    struct ButtonMapping {
+                        USHORT      downFlag;
+                        USHORT      upFlag;
+                        MMouseButton button;
+                    };
+
+                    static constexpr ButtonMapping kButtonMap[] = {
+                        { RI_MOUSE_LEFT_BUTTON_DOWN,   RI_MOUSE_LEFT_BUTTON_UP,   MMouseButton::Left   },
+                        { RI_MOUSE_RIGHT_BUTTON_DOWN,  RI_MOUSE_RIGHT_BUTTON_UP,  MMouseButton::Right  },
+                        { RI_MOUSE_MIDDLE_BUTTON_DOWN, RI_MOUSE_MIDDLE_BUTTON_UP, MMouseButton::Middle },
+                        { RI_MOUSE_BUTTON_4_DOWN,      RI_MOUSE_BUTTON_4_UP,      MMouseButton::X1     },
+                        { RI_MOUSE_BUTTON_5_DOWN,      RI_MOUSE_BUTTON_5_UP,      MMouseButton::X2     },
+                    };
+
+                    for (auto& [downFlag, upFlag, button] : kButtonMap) {
+                        if (ms.usButtonFlags & downFlag) {
+                            msst.buttons.set(static_cast<size_t>(button));
+                            global->push({MMouseButtonPressEvent{ timestamp_ms,id, button,},true,0});
+                        }
+                        if (ms.usButtonFlags & upFlag) {
+                            msst.buttons.reset(static_cast<size_t>(button));
+                            global->push({MMouseButtonPressEvent{ timestamp_ms,id, button,},true,0});
+                        }
+                    }
+
+                    // ── Scroll ────────────────────────────────────────────────
+                    // usButtonData holds the wheel delta when usButtonFlags has wheel bits.
+                    // WHEEL_DELTA = 120 per notch — normalize to 1.0 per notch.
+                    if (ms.usButtonFlags & RI_MOUSE_WHEEL) {
+                        float dy = static_cast<short>(ms.usButtonData) / (float)WHEEL_DELTA;
+                        global->push({MMouseScrollEvent{timestamp_ms, id, 0.f, dy},true,0});
+                    }
+
+                    if (ms.usButtonFlags & RI_MOUSE_HWHEEL) {
+                        float dx = static_cast<short>(ms.usButtonData) / (float)WHEEL_DELTA;
+                        global->push({MMouseScrollEvent{timestamp_ms, id, dx, 0.f},true,0});
+                    }
+                    break;
+                }
+
+                // ── HID (touch, stylus) ───────────────────────────────────────
+                case RIM_TYPEHID: {
+                    // Don't handle touch here — WM_POINTER is the correct API.
+                    // Raw HID touch reports are driver-specific and unreliable.
+                    break;
+            }
+        }
+
+        // Required — pass to DefWindowProc so system can do cleanup
+        return DefWindowProcW(hwnd, uMsg, wParam, lParam);
+        }
         case WM_INPUT_DEVICE_CHANGE:
+        {
             if(wParam == GIDC_ARRIVAL)
                 global->onDeviceConnected(reinterpret_cast<void*>(lParam));
             else
                 global->onDeviceDisconnected(reinterpret_cast<void*>(lParam));
             
             return 1;
-
+        }
         // ── Monitor changes ───────────────────────────────────────────────
         case WM_DISPLAYCHANGE:
-            // Resolution or bit depth changed
-            // → re-enumerate monitors
-            // → push MMonitorChangedEvent (if you have one)
+        {
+            std::vector<MMonitor> newM;
+            global->enumerateMonitors(newM);
+
+            std::unique_lock lock(global->monitor_lock);
+            std::vector<MMonitor>& oldM {global->monitors};
+
+            for (auto& curr : newM) {
+                auto it = std::find_if(oldM.begin(), oldM.end(),
+                    [&](const MMonitor& p) { return p.id == curr.id; });
+
+                if (it == oldM.end()) {
+                    continue;
+                }
+
+                auto& prev = *it;
+                MDisplayChangeFlags flags{};
+                flags.resolution  = (curr.currentMode().widthPx     != prev.currentMode().widthPx ||
+                                    curr.currentMode().heightPx    != prev.currentMode().heightPx);
+                flags.refreshRate = (curr.currentMode().refreshRate  != prev.currentMode().refreshRate);
+                flags.bitDepth    = (curr.currentMode().bitsPerChannel != prev.currentMode().bitsPerChannel);
+                flags.hdrState    = (curr.hdr.active               != prev.hdr.active);
+                flags.position    = (curr.rect.x != prev.rect.x    || curr.rect.y != prev.rect.y);
+
+                // Only push if something actually changed
+                if (flags.resolution || flags.refreshRate || flags.bitDepth || flags.hdrState || flags.position)
+                {
+                    if(flags.resolution || flags.refreshRate || flags.bitDepth)
+                    {
+                        for(size_t i{0};i < prev.availableModes.size();++i)
+                        {
+                            if(prev.availableModes[i] == curr.currentMode())
+                            {
+                                prev.currentModeIndex = i;
+                                break;
+                            }
+                        }
+                    }
+
+                    prev.hdr.active = curr.hdr.active;
+                    prev.rect.x = curr.rect.x;
+                    prev.rect.y = curr.rect.y;
+
+                    global->push({MDisplaySettingChangeEvent{prev, flags,curr.id},true,0});
+                }
+            }
+
+        }
 
         case WM_DEVICECHANGE:
-            // Covers monitor hotplug (connect/disconnect)
-            // → re-enumerate monitors
+        {
+            std::vector<MMonitor> newM;
+            global->enumerateMonitors(newM);
+
+            std::unique_lock lock(global->monitor_lock);
+            std::vector<MMonitor>& oldM {global->monitors};
+
+            switch(wParam)
+            {
+                case DBT_DEVICEARRIVAL:
+                {
+                    for (auto& new_mon : newM) {
+                        auto it = std::find_if(oldM.begin(), oldM.end(),
+                            [&new_mon](const MMonitor& m) { return m.id == new_mon.id; });
+                        if (it == oldM.end())
+                        {
+                            global->monitors.push_back(*it);
+                            global->push({MDisplayConnectedEvent{(*it).id},true,0});
+                        }
+                    }
+                }
+                case DBT_DEVICEREMOVECOMPLETE:
+                {
+                    for (size_t i{0};i < oldM.size();++i) {
+                        auto it = std::find_if(newM.begin(), newM.end(),
+                            [value = oldM[i].id](const MMonitor& m) { return m.id == value; });
+                        if (it == newM.end())
+                        {
+                            global->push({MDisplayConnectedEvent{(*it).id},true,0});
+                            global->monitors.erase(oldM.begin() + i);
+                        }
+                    }
+                }
+            }
+        }
+        
+        default: return DefWindowProc(hwnd, uMsg, wParam, lParam);
     }
+    return DefWindowProc(hwnd, uMsg, wParam, lParam);
 }
 
 namespace MW {
+
+    MGlobal* MGlobal::ptr = nullptr;
 
     MGlobal* MGlobal::init(const MInitConfig& config) {
         if(ptr) return ptr;
 
         ptr = new MGlobal{config};
 
-        SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        BOOL ok = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        if (!ok)
+        {
+            DWORD err = GetLastError();
+            assert(ok);
+        }
+
+        auto awareness =
+            GetAwarenessFromDpiAwarenessContext(GetThreadDpiAwarenessContext());
+        buildScanTable();
 
         WNDCLASSEXW wc{};
         wc.cbSize        = sizeof(wc);
@@ -249,7 +495,9 @@ namespace MW {
         ptr->createNotificationWindow();
         ptr->registerRawInputDevices();
         ptr->enumerateInputDevices();
-        ptr->enumerateMonitors();
+        ptr->enumerateMonitors(ptr->monitors);
+
+        *(ptr->front_buf.load(std::memory_order_acquire)) = *(ptr->back_buf.load(std::memory_order_acquire));
 
         setup_finished.store(true,std::memory_order_release);
 
@@ -458,7 +706,8 @@ namespace MW {
 
     MMonitor MGlobal::monitorFromPoint(MPoint pt) {
         std::shared_lock lock(monitor_lock);
-        assert(monitors.size() < 1 && "MWindow: Monitor list is empty, monitorFromPoint() has been called!");
+
+        assert(monitors.size() != 0 && "MWindow: Monitor list is empty, monitorFromPoint() has been called!");
         MMonitor& ans = monitors[0];
         float minDist = std::numeric_limits<float>::max();
 
@@ -480,13 +729,22 @@ namespace MW {
         return ans;
     }
 
-    float MGlobal::getCursorX() {}
-    float MGlobal::getCursorY() {}
+    std::optional<MDeviceID> MGlobal::devIDFromHandle(void* hDevice) {
+        std::shared_lock lock(dev_info_lock);
 
-    // Key state query for between-event polling
-    bool MGlobal::isKeyHeld(MKey key) {}
+        for(auto[ha,id] : deviceHandles)
+        {
+            if(hDevice == ha)
+                return id;
+        }
+        return std::nullopt;
+    }
 
-    // Merged methods from MGlobalBase
+    float MGlobal::getCursorX() { assert(false && "MGlobal::getCursorX hasn't been implemented!"); return 0.f; }
+    float MGlobal::getCursorY() { assert(false && "MGlobal::getCursorX hasn't been implemented!"); return 0.f; }
+
+    bool MGlobal::isKeyHeld(MKey key) {assert(false && "MGlobal::isKeyHeld hasn't been implemented!"); return false;}
+
     bool MGlobal::push(MEventSlot&& ev)
     {
         const std::size_t h = head.load(std::memory_order_acquire);
@@ -611,39 +869,29 @@ namespace MW {
         for (auto& entry : list)
         {
             MDeviceInfo di{};
-            di.type = toMDeviceType(entry.hDevice);
+            handleToMDeviceInfo(entry.hDevice, di);
             
             if(di.type == MDeviceType::Unknown)
                 continue;
 
             di.id = nextDevID;
-            di.name = GetDeviceName(entry.hDevice);
             devices.push_back(di);
 
             MDeviceState state { zeroInit(di.type) };
-            if(di.type == MDeviceType::Mouse)
-            {
-                POINT p{};
-                if (GetCursorPos(&p)) {
-                    HMONITOR hMon = MonitorFromPoint(p, MONITOR_DEFAULTTONEAREST);
-                    UINT dpiX, dpiY;
-                    GetDpiForMonitor(hMon, MDT_EFFECTIVE_DPI, &dpiX, &dpiY);
-                    float scale = dpiX / 96.f;
 
-                    std::get<MMouseState>(state).x = p.x / scale;
-                    std::get<MMouseState>(state).y = p.y / scale;
-                }
-            }
+            initializeDeviceState(state);
+
             buf->push_back({nextDevID, state});
             deviceHandles.push_back({reinterpret_cast<void*>(entry.hDevice), nextDevID++});
         }
     }
-    void MGlobal::enumerateMonitors()
+    void MGlobal::enumerateMonitors(std::vector<MMonitor>& vec)
     {
         EnumDisplayMonitors(
             nullptr, nullptr,
             [](HMONITOR hMon, HDC, LPRECT, LPARAM lParam) -> BOOL {
-                auto* self = reinterpret_cast<MGlobal*>(lParam);
+                auto* vec = reinterpret_cast<std::vector<MMonitor>*>(lParam);
+                auto* self = MGlobal::Get();
 
                 MONITORINFOEXW info{};
                 info.cbSize = sizeof(info);
@@ -706,9 +954,7 @@ namespace MW {
                     }
                 }
 
-
                 MMonitor mon{};
-                mon.id                 = self->nextMonID;
                 mon.name               = toNarrow(std::wstring(info.szDevice, info.szDevice + wcslen(info.szDevice)));
                 mon.rect               = rect;
                 mon.dpiScale           = scale;
@@ -717,24 +963,42 @@ namespace MW {
                 mon.availableModes     = std::move(availableModes);
                 mon.hdr                = queryHDRInfo(hMon, info.szDevice);
                 
-                self->monitorHandles.push_back({reinterpret_cast<void*>(hMon),self->nextMonID++});
-                self->monitors.push_back(std::move(mon));
+                {
+                    std::unique_lock lock(self->dev_info_lock);
+
+                    auto it = std::find_if(self->monitorHandles.begin(),self->monitorHandles.end(),
+                        [hMon](std::pair<void*, MMonitorID>& p) {
+                            return p.first == hMon;
+                        }
+                    );
+                    if(it == self->monitorHandles.end())
+                    {
+                        mon.id = self->nextMonID++;
+                    }
+                    else
+                    {
+                        mon.id = (*it).second;
+                        self->monitorHandles.push_back({reinterpret_cast<void*>(hMon),mon.id});
+                    }
+
+                    vec->push_back(std::move(mon));
+                }
 
                 return TRUE;
             },
-            reinterpret_cast<LPARAM>(this)
+            reinterpret_cast<LPARAM>(&vec)
         );
     }
 
     void MGlobal::onDeviceConnected(void* hDevice) {
         std::unique_lock lock(dev_info_lock);
-        MDeviceInfo info{0};
 
-        info.type = toMDeviceType(hDevice);
+        MDeviceInfo info{};
+        handleToMDeviceInfo(hDevice, info);
         if(info.type == MDeviceType::Unknown)
             return;
-        info.name = GetDeviceName(hDevice);
-        auto it = std::find_if(deviceHandles.begin(),deviceHandles.end(), [hDevice](std::pair<void*,MDeviceInfo>& p)
+        
+        auto it = std::find_if(deviceHandles.begin(),deviceHandles.end(), [hDevice](std::pair<void*,MDeviceID>& p)
                                                                             {
                                                                                 return p.first == hDevice;
                                                                             });
@@ -742,13 +1006,12 @@ namespace MW {
         if(it == deviceHandles.end())
         {    
             info.id = nextDevID++;
-            deviceHandles.push_back({reinterpret_cast<void*>(hDevice), info});
+            deviceHandles.push_back({reinterpret_cast<void*>(hDevice), info.id});
         }
         else
         {
-            info.id = (*it).second.id;
+            info.id = (*it).second;
 
-            auto* state = getBackStatePtr();
             auto iter = std::find_if(state->begin(),state->end(), [&info](std::pair<MDeviceID,MDeviceState>& p)
                                                                 {
                                                                     return p.first == info.id;
@@ -758,31 +1021,19 @@ namespace MW {
         }
 
         MDeviceState st { zeroInit(info.type) };
-        if(info.type == MDeviceType::Mouse)
-        {
-            POINT p{};
-            if (GetCursorPos(&p)) {
-                HMONITOR hMon = MonitorFromPoint(p, MONITOR_DEFAULTTONEAREST);
-                UINT dpiX, dpiY;
-                GetDpiForMonitor(hMon, MDT_EFFECTIVE_DPI, &dpiX, &dpiY);
-                float scale = dpiX / 96.f;
+        initializeDeviceState(st);
 
-                std::get<MMouseState>(st).x = p.x / scale;
-                std::get<MMouseState>(st).y = p.y / scale;
-            }
-        }
-
-        state->push_back({info.id,})
-
-        
+        state->push_back({info.id, st});
     }
     void MGlobal::onDeviceDisconnected(void* hDevice) {
         std::unique_lock lock(dev_info_lock);
-        auto it = std::find_if(deviceHandles.begin(),deviceHandles.end(), [hDevice](std::pair<void*,MDeviceInfo>& p)
+        auto it = std::find_if(deviceHandles.begin(),deviceHandles.end(), [hDevice](std::pair<void*,MDeviceID>& p)
                                                                             {
                                                                                 return p.first == hDevice;
                                                                             });
         if(it == deviceHandles.end())
             return;
+
+        deviceHandles.erase(it);
     }
 }

@@ -84,6 +84,7 @@ namespace MW
             GetModuleHandle(nullptr),
             nullptr
         );
+        id = global->registerWindow(reinterpret_cast<void*>(hw), this);
 
         SetWindowLongPtr(hw, GWLP_USERDATA, (LONG_PTR)global);
         
@@ -109,14 +110,13 @@ namespace MW
         }
         state1 = state2;
         hwnd.store(hw,std::memory_order_release);
-        id = global->registerWindow(reinterpret_cast<void*>(hw), this);
     }
 
     MWindowImpl::~MWindowImpl() {
         close();
     }
 
-    MWindowID getId() const {
+    MWindowID MWindowImpl::getId() const {
         return id;
     }
 

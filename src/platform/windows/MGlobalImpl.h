@@ -21,7 +21,7 @@
 
 namespace MW {
 
-    std::atomic<bool> setup_finished; // prevents a rare race between NotificationWndProc and enumerateInputDevices
+    inline std::atomic<bool> setup_finished; // prevents a rare race between NotificationWndProc and enumerateInputDevices
 
     constexpr int WINDOWS_DEVICE_COUNT { 6 };
     constexpr int WINDOWS_MONITOR_COUNT { 4 };
@@ -63,8 +63,6 @@ namespace MW {
         std::vector<std::pair<MDeviceID, MDeviceState>> statebuf2;
         MDeviceID nextDevID;
 
-        std::shared_mutex     monitor_lock;
-        std::vector<MMonitor> monitors;
         MMonitorID nextMonID;
 
         std::shared_mutex         window_lock;
@@ -86,14 +84,10 @@ namespace MW {
         void registerRawInputDevices();
 
         void enumerateInputDevices();
-        void enumerateMonitors();
 
         void consumeAll();
         void switchBuffers();
         void executeGlobalHandlerChain(const MEvent& ev);
-
-        std::vector<std::pair<MDeviceID, MDeviceState>>* getFrontStatePtr() const;
-        std::vector<std::pair<MDeviceID, MDeviceState>>* getBackStatePtr()  const;
     public:
         static MGlobal* init(const MInitConfig& config = {});
         static MGlobal* Get();
@@ -101,6 +95,11 @@ namespace MW {
 
         ~MGlobal();
 
+        std::shared_mutex     monitor_lock;
+        std::vector<MMonitor> monitors;
+        void enumerateMonitors(std::vector<MMonitor>& vec);
+        std::vector<std::pair<MDeviceID, MDeviceState>>* getFrontStatePtr() const;
+        std::vector<std::pair<MDeviceID, MDeviceState>>* getBackStatePtr()  const;
         // Drains the event queue, walks each event through registered handler chains
         void poll();
 
@@ -134,6 +133,8 @@ namespace MW {
         std::optional<MMonitorID> monIDFromHandle(void* hMon);
         std::optional<MMonitor>  monitorFromHandle(void* hMon);
         std::optional<MMonitor> monitorFromID(MMonitorID id);
+
+        std::optional<MDeviceID> devIDFromHandle(void* hDevice);
 
         MMonitor monitorFromPoint(MPoint pt);
 

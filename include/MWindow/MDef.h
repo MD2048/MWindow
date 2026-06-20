@@ -1,6 +1,8 @@
 #ifndef M_DEF_H
 #define M_DEF_H
 
+#include <iostream>
+
 namespace MW
 {
     struct MPoint {
@@ -17,6 +19,10 @@ namespace MW
 
         constexpr bool operator==(const MPoint& other) const noexcept { return x == other.x && y == other.y; }
         constexpr bool operator!=(const MPoint& other) const noexcept { return !(*this == other); }
+
+        friend std::ostream& operator<<(std::ostream& os, const MPoint& p) {
+            return os << "(" << p.x << ", " << p.y << ")";
+        }
 
     };
 
@@ -50,6 +56,11 @@ namespace MW
         constexpr MPoint middle() const noexcept { return { x - (width/2), y - (height/2) }; }
         constexpr MSize  size() const noexcept { return { width, height }; }
         constexpr bool   contains(MPoint p) const noexcept { return (x <= p.x) && (p.x < x+width) && (y <= p.y) && (p.y < y+height); }
+
+        friend std::ostream& operator<<(std::ostream& os, const MRect& r) {
+            return os << "[" << r.x << ", " << r.y << ", " << r.width << "x" << r.height << "]";
+        }
+
     };   
 }
 
