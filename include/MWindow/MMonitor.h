@@ -41,6 +41,8 @@ namespace MW
     };
 
     struct MDisplayChangeFlags {
+        bool rect        : 1;
+        bool scale       : 1;
         bool resolution  : 1;  // widthPx / heightPx changed
         bool refreshRate : 1;  // refresh rate changed
         bool bitDepth    : 1;  // bitsPerChannel changed

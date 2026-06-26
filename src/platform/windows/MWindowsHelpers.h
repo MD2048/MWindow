@@ -19,32 +19,41 @@
 #include <dxgi1_6.h>
 
 using namespace MW;
+    
+inline bool operator==(const RECT& r1, const RECT& r2)
+{
+    return r1.left == r2.left && r1.top == r2.top && r1.right == r2.right && r1.bottom == r2.bottom;
+}
+
+inline bool operator!=(const RECT& r1, const RECT& r2)
+{
+    return !(r1 == r2);
+}
 
 inline RECT MRectToRECT(const MRect& mr, float scale)
 {
     return RECT{
-        static_cast<LONG>(mr.x/scale),
-        static_cast<LONG>(mr.y/scale),
-        static_cast<LONG>((mr.x + mr.width)/scale),
-        static_cast<LONG>((mr.y + mr.height)/scale)
+        static_cast<LONG>(mr.x*scale),
+        static_cast<LONG>(mr.y*scale),
+        static_cast<LONG>((mr.x + mr.width)*scale),
+        static_cast<LONG>((mr.y + mr.height)*scale)
     };
 }
 
 inline MRect RECTToMRect(const RECT& r, float scale)
 {
     return MRect{
-        static_cast<float>(r.left*scale),
-        static_cast<float>(r.top*scale),
-        static_cast<float>((r.right - r.left)*scale),
-        static_cast<float>((r.bottom - r.top)*scale)
+        static_cast<float>(r.left/scale),
+        static_cast<float>(r.top/scale),
+        static_cast<float>((r.right - r.left)/scale),
+        static_cast<float>((r.bottom - r.top)/scale)
     };
 }
 
 inline std::wstring toWide(const std::string& s) {
-    if (s.empty())
-        return {};
+    if (s.empty()) return {};
     int len = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
-    std::wstring w(len, L'\0');
+    std::wstring w(len - 1, L'\0');
     MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, w.data(), len);
     return w;
 }
@@ -122,71 +131,6 @@ inline MRect resolveWindowRect(MRect rect, const std::vector<MMonitor>& monitors
         target->rect.y + target->rect.height - rect.height);
 
     return rect;
-}
-
-
-inline void handleToMDeviceInfo(HANDLE hDevice, MDeviceInfo& info) // NOTE: id is not filled by this function !
-{
-    // name
-    UINT size = 0;
-
-    GetRawInputDeviceInfoA(
-        hDevice,
-        RIDI_DEVICENAME,
-        nullptr,
-        &size);
-
-    if (size == 0)
-        info.name = {};
-    else
-    {
-        info.name.resize(size);
-        if (GetRawInputDeviceInfoA(
-            hDevice,
-            RIDI_DEVICENAME,
-            info.name.data(),
-            &size) == static_cast<UINT>(-1))
-
-            info.name = {};
-
-        else if (!info.name.empty())
-        {
-            if(info.name.back() == '\0')
-                info.name.pop_back();
-        }
-    }
-    // type
-
-    RID_DEVICE_INFO rdinfo{};
-    rdinfo.cbSize = sizeof(rdinfo);
-    size = sizeof(rdinfo);
-    GetRawInputDeviceInfoW(hDevice, RIDI_DEVICEINFO, &rdinfo, &size);
-
-    switch (rdinfo.dwType) {
-        case RIM_TYPEKEYBOARD: info.type = MDeviceType::Keyboard;  break;
-        case RIM_TYPEMOUSE:    info.type = MDeviceType::Mouse; break;
-        case RIM_TYPEHID: {
-            switch (rdinfo.hid.usUsagePage) {
-                case 0x01: // Generic Desktop
-                    switch (rdinfo.hid.usUsage) {
-                        case 0x04: info.type = MDeviceType::Gamepad;   break;  // Joystick
-                        case 0x05: info.type = MDeviceType::Gamepad;  break;   // Gamepad
-                        case 0x08: info.type = MDeviceType::Mouse;  break;     // Multi-axis (trackball etc)
-                        default:   info.type = MDeviceType::Unknown; break;
-                    }
-                case 0x0D: // Digitizer
-                    switch (rdinfo.hid.usUsage) {
-                        case 0x01: info.type = MDeviceType::Stylus; break;      // Digitizer
-                        case 0x02: info.type = MDeviceType::Stylus;  break;     // Pen
-                        case 0x04: info.type = MDeviceType::Touchscreen; break; // Touchscreen
-                        case 0x05: info.type = MDeviceType::Touchscreen; break; // Touch pad
-                        default:   info.type = MDeviceType::Unknown; break;
-                    }
-                default: info.type = MDeviceType::Unknown; break;
-            }
-        }
-        default: info.type = MDeviceType::Unknown; break;
-    }
 }
 
 template<class... Ts>

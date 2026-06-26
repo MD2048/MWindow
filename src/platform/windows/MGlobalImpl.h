@@ -23,17 +23,17 @@ namespace MW {
 
     inline std::atomic<bool> setup_finished; // prevents a rare race between NotificationWndProc and enumerateInputDevices
 
-    constexpr int WINDOWS_DEVICE_COUNT { 6 };
+    constexpr int WINDOWS_DEVICE_COUNT { 1+1+1+1+4 }; // keyboard + mouse + touchscreen + stylus + 4 * gamepad
+                                                      // index with MDeviceType enum
     constexpr int WINDOWS_MONITOR_COUNT { 4 };
     constexpr int WINDOWS_GLOBAL_HANDLER_COUNT { 4 };
     constexpr int WINDOWS_WINDOW_COUNT { 4 };
 
     class MWindowImpl;
-
     class MGlobal {
-    private:
+    
         static MGlobal* ptr;
-        
+    public:
         struct MWindowEntry {
             MWindowID    id;
             void*        hwnd;
@@ -46,22 +46,24 @@ namespace MW {
             MWindowID id;
         };
 
+        struct MMonitorEntry {
+            MMonitorID id;
+            void* handle;
+            std::string name;
+        };
+    //private:
         MInitConfig settings;
 
         std::size_t mask;
-        alignas(64) std::atomic<std::size_t> head;
-        alignas(64) std::atomic<std::size_t> tail;
+        std::size_t head;
+        std::size_t tail;
         std::unique_ptr<MEventSlot[]> buffer;
 
-        std::atomic<std::vector<std::pair<MDeviceID, MDeviceState>>*> front_buf;
-        std::atomic<std::vector<std::pair<MDeviceID, MDeviceState>>*> back_buf;
+        std::atomic<std::vector<MDeviceState>*> front_buf;
+        std::atomic<std::vector<MDeviceState>*> back_buf;
 
-        std::shared_mutex        dev_info_lock;
-        std::vector<MDeviceInfo> devices;
-
-        std::vector<std::pair<MDeviceID, MDeviceState>> statebuf1;
-        std::vector<std::pair<MDeviceID, MDeviceState>> statebuf2;
-        MDeviceID nextDevID;
+        std::vector<MDeviceState> statebuf1;
+        std::vector<MDeviceState> statebuf2;
 
         MMonitorID nextMonID;
 
@@ -73,8 +75,7 @@ namespace MW {
         std::vector<MEventHandlerEntry> global_handlers;
         MEventHandlerID nextHandlerID;
 
-        std::vector<std::pair<void*, MMonitorID>> monitorHandles;
-        std::vector<std::pair<void*, MDeviceID>> deviceHandles;
+        std::vector<MMonitorEntry> monitorEntrys;
 
         void* notificationHWND;
 
@@ -83,12 +84,14 @@ namespace MW {
         void createNotificationWindow();
         void registerRawInputDevices();
 
-        void enumerateInputDevices();
-
+        void onMonitorChange();
         void consumeAll();
         void switchBuffers();
         void executeGlobalHandlerChain(const MEvent& ev);
-    public:
+        bool shouldCoalesce(const MEvent& a);
+        size_t findCoalescableEventIndex(const MEventSlot& ev, void* hwnd);
+        void coalesceEvent(size_t index, const MEvent& ev);
+    //public:
         static MGlobal* init(const MInitConfig& config = {});
         static MGlobal* Get();
         static void shutdown();
@@ -98,20 +101,18 @@ namespace MW {
         std::shared_mutex     monitor_lock;
         std::vector<MMonitor> monitors;
         void enumerateMonitors(std::vector<MMonitor>& vec);
-        std::vector<std::pair<MDeviceID, MDeviceState>>* getFrontStatePtr() const;
-        std::vector<std::pair<MDeviceID, MDeviceState>>* getBackStatePtr()  const;
+        std::vector<MDeviceState>* getFrontStatePtr() const;
+        std::vector<MDeviceState>* getBackStatePtr()  const;
+        bool mouseTracking;
+        wchar_t pendingSurrogate; // for WM_CHAR surrogate pair handling
+        bool shouldDeliverToFocused() const { return settings.deliverToFocused; }
         // Drains the event queue, walks each event through registered handler chains
         void poll();
 
         // Event queue push
-        bool push(MEventSlot&& ev); 
+        bool push(MEvent&& ev, void* hwnd);
 
         //bool isRunning();
-
-        // Device query
-        std::vector<MDeviceInfo>    getConnectedDevices();
-        std::optional<MDeviceState const*> getDeviceState(MDeviceID id);
-        bool                        isDeviceConnected(MDeviceID id);
 
         // Monitor query
         std::vector<MMonitor>   getConnectedMonitors();
@@ -129,23 +130,19 @@ namespace MW {
         std::optional<MWindowID> idFromHWND(void* hwnd);
         std::optional<MWindowImpl*> ptrFromHWND(void* hwnd);
         std::optional<MWindowImpl*> ptrFromID(MWindowID id);
+        std::optional<MWindowID> getFocusedID();
 
         std::optional<MMonitorID> monIDFromHandle(void* hMon);
         std::optional<MMonitor>  monitorFromHandle(void* hMon);
-        std::optional<MMonitor> monitorFromID(MMonitorID id);
-
-        std::optional<MDeviceID> devIDFromHandle(void* hDevice);
+        std::optional<void*> handleFromID(MWindowID id);
 
         MMonitor monitorFromPoint(MPoint pt);
+        float dpiFromHandle(void* hMon);
 
-        float getCursorX();
-        float getCursorY();
+        MPoint getCursorPos();
 
         // Key state query for between-event polling
         bool isKeyHeld(MKey key);
-
-        void onDeviceConnected(void* hDevice);
-        void onDeviceDisconnected(void* hDevice);
     };
 }
 

@@ -21,8 +21,7 @@ namespace MW {
     public:
         struct MWindowState {
             bool focused             = false;
-            DWORD currentStyle       = 0;
-            DWORD preFullScreenStyle = 0;      // saved before entering fullscreen
+            DWORD windowStyle = 0;      // saved before entering fullscreen
             RECT  currentRect        {};       // this avoids comparing floats
             RECT  preFullscreenRect  {};       // not adjusted physical
                                                // exstyle is 0 except in fullscreen: WS_EX_APPWINDOW
@@ -33,29 +32,34 @@ namespace MW {
         
         MWindowID id;
         std::atomic<bool> alive;
-        std::atomic<HWND> hwnd;
+        HWND hwnd;
 
         mutable std::mutex back_state_lock;
-        std::atomic<MWindowState*> back_state;
-        std::atomic<MWindowState*> front_state;
+        MWindowState* back_state;
+        MWindowState* front_state;
         MWindowState state1;
         MWindowState state2;
     public:
+        std::atomic<bool> state_change;
+
         MWindowImpl(const MWindowDesc& desc);
 
         ~MWindowImpl() override;
 
         MWindowID getId() const override;
 
-        MWindowState const* getFrontStatePtr() const;
-        MWindowState* getBackStatePtr() const;
-        void switchBuffers();
+        inline MWindowState const* getFrontStatePtr() const;
+        inline MWindowState* getBackStatePtr() const;
+        void handleStateRequests();
+        void syncState();
+        void onMonitorChange();
 
         // ── Lifecycle ─────────────────────────────────────────────────────────
         void show()  override;
         void hide()  override;
         void close() override;
 
+        [[nodiscard]] virtual bool isAlive() const override;
         [[nodiscard]] bool isVisible() const override;  // false when minimized
 
         // ── Properties (all logical) ──────────────────────────────────────────

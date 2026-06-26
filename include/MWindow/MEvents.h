@@ -11,9 +11,9 @@
 #include <variant>
 #include <functional>
 
-using TouchID = uint64_t;
-
 namespace MW {
+
+    using MTouchID = uint64_t;
 
     struct MVisibilityChangeEvent {
         bool isVisible;
@@ -41,96 +41,116 @@ namespace MW {
         MMonitorID new_id;
     };
 
-        struct MKeyPressEvent {
-            uint64_t timestamp;
-            MDeviceID deviceId;
-            MKey key;
-            MMods mods;
-        };
-
-        struct MKeyReleaseEvent {
-            uint64_t timestamp;
-            MDeviceID deviceId;
-            MKey key;
-            MMods mods;
-        };
-
-        struct MCharEvent {
-            MDeviceID deviceId;
-            std::string input;
-        };
-
-        struct MMouseMoveEvent {
-            uint64_t timestamp;
-            MDeviceID deviceId;
-            MPoint new_pos;
-            float dx, dy;
-        };
-
-        struct MMouseButtonPressEvent {
-            uint64_t timestamp;
-            MDeviceID deviceId;
-            MMouseButton button;
-            MMods mods;
-        };
-
-        struct MMouseButtonReleaseEvent {
-            uint64_t timestamp;
-            MDeviceID deviceId;
-            MMouseButton button;
-            MMods mods;
-        };
-
-        struct MMouseScrollEvent {
-            uint64_t timestamp;
-            MDeviceID deviceId;
-            float dx;
-            float dy;
-            MMods mods;
-        };
-
-        struct MMouseEnterEvent { MDeviceID deviceId; };
-
-        struct MMouseLeaveEvent { MDeviceID deviceId; };
-
-        struct MTouchBeginEvent {
-            uint64_t timestamp;
-            TouchID id;
-
-            float x;
-            float y;
-        };
-
-        struct MTouchMoveEvent {
-            uint64_t timestamp;
-            TouchID id;
-
-            float x;
-            float y;
-
-            float dx;
-            float dy;
-        };
-        
-        struct MTouchEndEvent {
-            uint64_t timestamp;
-            TouchID id;
-
-            float x;
-            float y;
-        };
-
-        struct MTouchCancelEvent {
-            uint64_t timestamp;
-            TouchID id;
-        };
-
-    struct MDeviceConnectedEvent {
-        MDeviceInfo dev_info;
+    struct MKeyPressEvent {
+        uint64_t timestamp;
+        MKey key;
+        MMods mods;
     };
 
-    struct MDeviceDisconnectedEvent {
-        MDeviceInfo dev_info;
+    struct MKeyReleaseEvent {
+        uint64_t timestamp;
+        MKey key;
+        MMods mods;
+    };
+
+    struct MCharEvent {
+        std::string input;
+    };
+
+    struct MMouseMoveEvent {
+        uint64_t timestamp;
+        float dx, dy;
+    };
+
+    struct MMouseButtonPressEvent {
+        uint64_t timestamp;
+        MMouseButton button;
+        MPoint pos;
+        MMods mods;
+    };
+
+    struct MMouseButtonReleaseEvent {
+        uint64_t timestamp;
+        MMouseButton button;
+        MPoint pos;
+        MMods mods;
+    };
+
+    struct MMouseScrollEvent {
+        uint64_t timestamp;
+        float dx;
+        float dy;
+        MMods mods;
+    };
+
+    struct MMouseEnterEvent { uint64_t timestamp; };
+
+    struct MMouseLeaveEvent { uint64_t timestamp; };
+
+    struct MTouchBeginEvent {
+        uint64_t timestamp;
+        MTouchID id;
+        MPoint pos;
+    };
+
+    struct MTouchMoveEvent {
+        uint64_t timestamp;
+        MTouchID id;
+
+        MPoint new_pos;
+
+        float dx;
+        float dy;
+    };
+    
+    struct MTouchEndEvent {
+        uint64_t timestamp;
+        MTouchID id;
+
+        MPoint pos;
+    };
+
+    struct MTouchCancelEvent {
+        uint64_t timestamp;
+        MTouchID id;
+    };
+
+    struct MStylusEnterEvent {
+        uint64_t timestamp;
+        MPoint pos;
+    };
+
+    struct MStylusHoverEvent {
+        uint64_t timestamp;
+
+        MPoint new_pos;
+        float dx,dy;
+    };
+
+    struct MStylusLeaveEvent {
+        uint64_t timestamp;
+        MPoint pos;
+    };
+
+    struct MStylusDownEvent {
+        uint64_t timestamp;
+        MPoint pos;
+    };
+
+    struct MStylusMoveEvent {
+        uint64_t timestamp;
+
+        MPoint new_pos;
+        float dx,dy;
+    };
+
+    struct MStylusUpEvent {
+        uint64_t timestamp;
+        MPoint pos;
+    };
+
+    struct MStylusCancelEvent {
+        uint64_t timestamp;
     };
 
     struct MDisplaySettingChangeEvent {
@@ -151,33 +171,39 @@ namespace MW {
             std::monostate,
 
             // Visibibility
-            MVisibilityChangeEvent,
+            MVisibilityChangeEvent, // coalescable
             // Window
             MCloseRequestEvent,
-            MResizeEvent,
-            MMoveEvent,
-            MFocusChangeEvent,
+            MResizeEvent,           // coalescable
+            MMoveEvent,             // coalescable
+            MFocusChangeEvent,      // coalescable
             MMonitorChangeEvent,
             // Keyboard
             MKeyPressEvent,
             MKeyReleaseEvent,
             MCharEvent,
             // Mouse
-            MMouseMoveEvent,
+            MMouseMoveEvent,        // coalescable
             MMouseButtonPressEvent,
             MMouseButtonReleaseEvent,
-            MMouseScrollEvent,
+            MMouseScrollEvent,      // coalescable
             MMouseEnterEvent,
             MMouseLeaveEvent,
             // Touch
             MTouchBeginEvent,
-            MTouchMoveEvent,
+            MTouchMoveEvent,        // coalescable !
             MTouchEndEvent,
             MTouchCancelEvent,
+            // Gamepad
 
-            //Devices
-            MDeviceConnectedEvent,
-            MDeviceDisconnectedEvent,
+            // Stylus
+            MStylusEnterEvent,
+            MStylusHoverEvent,      // coalescable !
+            MStylusLeaveEvent,
+            MStylusDownEvent,
+            MStylusMoveEvent,       // coalescable !
+            MStylusUpEvent,
+            MStylusCancelEvent,
             // Monitors
             MDisplaySettingChangeEvent,
             MDisplayConnectedEvent,
@@ -188,6 +214,26 @@ namespace MW {
             // MDropLeaveEvent,
             // MDropEvent,
     >;
+
+    inline bool isAffectedByDeliverToFocused(const MEvent& ev)
+    {
+        return std::visit(OVL {
+            [](const MKeyPressEvent& ev) { return true; },
+            [](const MKeyReleaseEvent& ev) { return true; },
+
+            [](const MMouseMoveEvent& ev) { return true; },
+            [](const MMouseButtonPressEvent& ev) { return true; },
+            [](const MMouseButtonReleaseEvent& ev) { return true; },
+            [](const MMouseScrollEvent& ev) { return true; },
+
+            [](const MTouchBeginEvent& ev) { return true; },
+            [](const MTouchMoveEvent& ev) { return true; },
+            [](const MTouchEndEvent& ev) { return true; },
+            [](const MTouchCancelEvent& ev) { return true; },
+
+            [](const auto&) { return false; }
+        }, ev);
+    }
 
 
     enum class MEventResult { Continue, Consumed };
@@ -201,27 +247,27 @@ namespace MW {
             [&os](std::monostate) { os << "[Empty Event]"; },
 
             // Visibility
-            [&os](const MVisibilityChangeEvent&) { os << "MVisibilityChangeEvent"; },
+            [&os](const MVisibilityChangeEvent& e) { os << "MVisibilityChangeEvent: " << (e.isVisible ? "visible":"invisible"); },
 
             // Window
             [&os](const MCloseRequestEvent&)  { os << "MCloseRequestEvent"; },
-            [&os](const MResizeEvent&)        { os << "MResizeEvent"; },
-            [&os](const MMoveEvent&)          { os << "MMoveEvent"; },
-            [&os](const MFocusChangeEvent&)   { os << "MFocusChangeEvent"; },
-            [&os](const MMonitorChangeEvent&) { os << "MMonitorChangeEvent"; },
+            [&os](const MResizeEvent& e)        { os << "MResizeEvent: " << e.new_size; },
+            [&os](const MMoveEvent& e)          { os << "MMoveEvent: " << e.new_pos; },
+            [&os](const MFocusChangeEvent& e)   { os << "MFocusChangeEvent: " << e.focused ? "focused" : "not focused"; },
+            [&os](const MMonitorChangeEvent& e) { os << "MMonitorChangeEvent: " << e.new_id; },
 
             // Keyboard
-            [&os](const MKeyPressEvent&)   { os << "MKeyPressEvent"; },
-            [&os](const MKeyReleaseEvent&) { os << "MKeyReleaseEvent"; },
-            [&os](const MCharEvent&)       { os << "MCharEvent"; },
+            [&os](const MKeyPressEvent& e)   { os << "MKeyPressEvent: " << ToString(e.key); },
+            [&os](const MKeyReleaseEvent& e) { os << "MKeyReleaseEvent: " << ToString(e.key); },
+            [&os](const MCharEvent& e)       { os << "MCharEvent: " << e.input; },
 
             // Mouse
-            [&os](const MMouseMoveEvent&)          { os << "MMouseMoveEvent"; },
-            [&os](const MMouseButtonPressEvent&)   { os << "MMouseButtonPressEvent"; },
-            [&os](const MMouseButtonReleaseEvent&) { os << "MMouseButtonReleaseEvent"; },
-            [&os](const MMouseScrollEvent&)        { os << "MMouseScrollEvent"; },
-            [&os](const MMouseEnterEvent&)         { os << "MMouseEnterEvent"; },
-            [&os](const MMouseLeaveEvent&)         { os << "MMouseLeaveEvent"; },
+            [&os](const MMouseMoveEvent& e)          { os << "MMouseMoveEvent: " << e.dx << " " << e.dy; },
+            [&os](const MMouseButtonPressEvent& e)   { os << "MMouseButtonPressEvent: " << ToString(e.button); },
+            [&os](const MMouseButtonReleaseEvent& e) { os << "MMouseButtonReleaseEvent: " << ToString(e.button); },
+            [&os](const MMouseScrollEvent& e)        { os << "MMouseScrollEvent: " << e.dx << " " << e.dy; },
+            [&os](const MMouseEnterEvent& e)         { os << "MMouseEnterEvent"; },
+            [&os](const MMouseLeaveEvent& e)         { os << "MMouseLeaveEvent"; },
 
             // Touch
             [&os](const MTouchBeginEvent&)  { os << "MTouchBeginEvent"; },
@@ -229,14 +275,12 @@ namespace MW {
             [&os](const MTouchEndEvent&)    { os << "MTouchEndEvent"; },
             [&os](const MTouchCancelEvent&) { os << "MTouchCancelEvent"; },
 
-            // Devices
-            [&os](const MDeviceConnectedEvent&)    { os << "MDeviceConnectedEvent"; },
-            [&os](const MDeviceDisconnectedEvent&) { os << "MDeviceDisconnectedEvent"; },
-
             // Monitors
             [&os](const MDisplaySettingChangeEvent&) { os << "MDisplaySettingChangeEvent"; },
             [&os](const MDisplayConnectedEvent&)     { os << "MDisplayConnectedEvent"; },
-            [&os](const MDisplayDisconnectedEvent&)  { os << "MDisplayDisconnectedEvent"; }
+            [&os](const MDisplayDisconnectedEvent&)  { os << "MDisplayDisconnectedEvent"; },
+
+            [&os](const auto&) {os << "Unknown";}
             
         }, ev);
         

@@ -28,17 +28,12 @@ namespace MW
         MMonitorID monitor;
     };
 
-    enum class MCoalescePolicy {
-        None,       // keep all events
-        Latest,     // drop all but the last (mouse move, touch move)
-        Accumulate, // sum deltas (scroll wheel)
-    };
-
     struct MInitConfig {
         std::size_t     eventQueueCapacity = 256;  // must be power of 2
-        MCoalescePolicy mouseMovePolicy    = MCoalescePolicy::Latest;
-        MCoalescePolicy touchMovePolicy    = MCoalescePolicy::Latest;
-        MCoalescePolicy scrollPolicy       = MCoalescePolicy::Accumulate;
+        bool deliverToFocused       = true;
+        bool mouseMoveCoalescing    = true;
+        bool touchMoveCoalescing    = true;
+        bool scrollCoalescing       = true;
     };
 
     struct MEventHandlerEntry {

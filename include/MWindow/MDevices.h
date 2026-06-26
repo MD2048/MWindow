@@ -13,7 +13,7 @@ namespace MW
 {
     using MDeviceID = uint64_t;
 
-    enum class MDeviceType   { Unknown, Keyboard, Mouse, Touchscreen, Gamepad, Stylus };
+    enum class MDeviceType   { Unknown = -1, Keyboard, Mouse, Touchscreen, Stylus, Gamepad };
     // Gamepad = Controller
 
     struct MMods {
@@ -70,7 +70,11 @@ namespace MW
 
     // Reserved — no fields yet, just a placeholder so the variant compiles
     struct MGamepadState {};
-    struct MStylusState  {};
+    struct MStylusState  {
+        bool    inRange   = false;
+        bool    inContact = false;
+        MPoint  pos       = {0,0};
+    };
 
     using MDeviceState = std::variant<
         MKeyboardState,
@@ -79,25 +83,6 @@ namespace MW
         MGamepadState,
         MStylusState
     >;
-
-    inline MDeviceState zeroInit(MDeviceType ty)
-    {
-        switch(ty)
-        {
-            case MDeviceType::Keyboard   : return MDeviceState{std::in_place_type<MKeyboardState>};
-            case MDeviceType::Mouse      : return MDeviceState{std::in_place_type<MMouseState>};
-            case MDeviceType::Touchscreen: return MDeviceState{std::in_place_type<MTouchState>};
-            case MDeviceType::Gamepad    : return MDeviceState{std::in_place_type<MGamepadState>};
-            case MDeviceType::Stylus     : return MDeviceState{std::in_place_type<MStylusState>};
-            default: return MDeviceState{std::in_place_type<MStylusState>};
-        }
-    }
-
-    struct MDeviceInfo {
-        MDeviceID   id;
-        std::string name;
-        MDeviceType type;
-    };
 
     inline const char* toString(MDeviceType type) {
         switch (type) {
@@ -108,15 +93,6 @@ namespace MW
             case MDeviceType::Stylus:      return "Stylus";
             default:                       return "Unknown";
         }
-    }
-
-    // 2. MDeviceInfo Formatter
-    inline std::ostream& operator<<(std::ostream& os, const MDeviceInfo& info) {
-        os << "==================================================\n"
-        << " DEVICE: " << info.name << " (ID: " << info.id << ")\n"
-        << " TYPE:   " << toString(info.type) << "\n"
-        << "==================================================";
-        return os;
     }
 
     // 3. MMods Formatter

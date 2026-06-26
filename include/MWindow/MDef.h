@@ -36,6 +36,9 @@ namespace MW
         constexpr bool operator==(const MSize& other) const noexcept { return width == other.width && height == other.height; }
         constexpr bool operator!=(const MSize& other) const noexcept { return !(*this == other); }
         
+        friend std::ostream& operator<<(std::ostream& os, const MSize& s) {
+            return os << "[" << s.width << "x" << s.height << "] ";
+        }
     };
     
     struct MRect {
@@ -49,11 +52,14 @@ namespace MW
             : x(x), y(y), width(w), height(h) {
         }
 
+        constexpr bool operator==(const MRect& other) const noexcept { return size() == other.size() && topLeft() == other.topLeft(); }
+        constexpr bool operator!=(const MRect& other) const noexcept { return !(*this == other); }
+
         constexpr MPoint topLeft() const noexcept { return { x, y }; }
         constexpr MPoint topRight() const noexcept { return { x + width, y }; }
         constexpr MPoint bottomLeft() const noexcept { return {x, y + height}; }
         constexpr MPoint bottomRight() const noexcept { return { x + width, y + height }; }
-        constexpr MPoint middle() const noexcept { return { x - (width/2), y - (height/2) }; }
+        constexpr MPoint middle() const noexcept { return { x + (width/2), y + (height/2) }; }
         constexpr MSize  size() const noexcept { return { width, height }; }
         constexpr bool   contains(MPoint p) const noexcept { return (x <= p.x) && (p.x < x+width) && (y <= p.y) && (p.y < y+height); }
 

@@ -12,6 +12,12 @@
 #endif
 
 namespace MW {
+
+    void* MWindow::passHandle()
+    {
+        return MGlobal::Get()->windows.at(0).hwnd;
+    }
+
     static MGlobal* ptr{ nullptr };
 
     void init(const MInitConfig& config) { ptr = MGlobal::init(config); }
@@ -38,20 +44,6 @@ namespace MW {
         ptr->unregisterGlobalEventHandler(id);
     }
 
-    std::vector<MDeviceInfo> getConnectedDevices() {
-        assert(ptr && "MWindow::getConnectedDevices(): Initialize MWindow before calling this function!"); 
-        return ptr->getConnectedDevices();
-    }
-
-    std::optional<MDeviceState const*> getDeviceState(MDeviceID id) { 
-        assert(ptr && "MWindow::getDeviceState(): Initialize MWindow before calling this function!"); 
-        return ptr->getDeviceState(id); 
-    }
-
-    bool isDeviceConnected(MDeviceID id) {
-        assert(ptr && "MWindow::isDeviceConnected(): Initialize MWindow before calling this function!"); 
-        return ptr->isDeviceConnected(id); }
-
     // Monitor query
 
     std::vector<MMonitor> getConnectedMonitors() {
@@ -71,13 +63,9 @@ namespace MW {
         assert(ptr && "MWindow::isMonitorConnected(): Initialize MWindow before calling this function!"); 
         return ptr->isMonitorConnected(id); }
 
-    float getCursorX() { 
+    MPoint getCursorPos() { 
         assert(ptr && "MWindow::getCursorX(): Initialize MWindow before calling this function!"); 
-        return ptr->getCursorX(); 
-    }
-    float getCursorY() { 
-        assert(ptr && "MWindow::getCursorY(): Initialize MWindow before calling this function!"); 
-        return ptr->getCursorY(); 
+        return ptr->getCursorPos(); 
     }
 
     bool isKeyHeld(MKey key) {

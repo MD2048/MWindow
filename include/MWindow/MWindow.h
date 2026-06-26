@@ -32,20 +32,13 @@ namespace MW {
     MEventHandlerID registerGlobalEventHandler(MEventHandler ha);
     void            unregisterGlobalEventHandler(MEventHandlerID id);
 
-
-    // Device query
-    std::vector<MDeviceInfo>    getConnectedDevices();
-    std::optional<MDeviceState const*> getDeviceState(MDeviceID id);
-    bool                        isDeviceConnected(MDeviceID id);
-
     // Monitor query
     std::vector<MMonitor>   getConnectedMonitors();
     std::optional<MMonitor> getMonitor(MMonitorID id);
     std::optional<MMonitor> getPrimaryMonitor();
     bool                    isMonitorConnected(MMonitorID id);
 
-    float getCursorX();
-    float getCursorY();
+    MPoint getCursorPos();
 
     // Key state query for between-event polling
     bool isKeyHeld(MKey key);
@@ -73,6 +66,7 @@ namespace MW {
         virtual void hide()  = 0;
         virtual void close() = 0;
 
+        [[nodiscard]] virtual bool isAlive() const = 0;
         [[nodiscard]] virtual bool isVisible() const = 0;  // false when minimized
 
         // ── Properties (all logical) ──────────────────────────────────────────
@@ -104,6 +98,8 @@ namespace MW {
 
         // ── Factory ───────────────────────────────────────────────────────────
         [[nodiscard]] static std::unique_ptr<MWindow> create(const MWindowDesc& desc);
+
+        void* passHandle();
     };
 
 } // namespace MWindow
