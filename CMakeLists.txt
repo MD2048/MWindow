@@ -32,7 +32,7 @@ if(WIN32)
         src/platform/windows/MWindowImpl.cpp
         src/platform/windows/MGlobalImpl.cpp
     )
-    target_link_libraries(MWindow PRIVATE Shcore dxgi.lib dwmapi.lib)
+    target_link_libraries(MWindow PRIVATE Shcore dxgi.lib dwmapi.lib xinput.lib GameInput)
 elseif(ANDROID)
     target_link_options(MWindow INTERFACE "-Wl,--export-dynamic")
 

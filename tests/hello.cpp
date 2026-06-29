@@ -35,8 +35,8 @@ void tester(MWindow* mw,int ctr)
 int main()
 {
     MInitConfig config {};
+    config.ignoreGamepads = false;
     config.eventQueueCapacity = 256;
-    config.deliverToFocused = true;
     config.mouseMoveCoalescing = true;
     config.touchMoveCoalescing = true;
     config.scrollCoalescing = true;
@@ -98,6 +98,8 @@ int main()
                     mw->setWindowMode(MWindowMode::Fullscreen);
                 else if(e.key == MKey::W)
                     mw->setWindowMode(MWindowMode::Windowed);
+                if(e.key == MKey::M)
+                    std::cout << getMods();
             }
             std::cout << ev << std::endl;
             return MEventResult::Consumed;

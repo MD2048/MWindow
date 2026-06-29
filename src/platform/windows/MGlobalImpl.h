@@ -19,6 +19,14 @@
 #include <optional>
 
 
+#ifndef NOMINMAX
+    #define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+    #define WIN32_LEAN_AND_MEAN
+#endif
+#include <GameInput.h>
+
 namespace MW {
 
     inline std::atomic<bool> setup_finished; // prevents a rare race between NotificationWndProc and enumerateInputDevices
@@ -51,7 +59,18 @@ namespace MW {
             void* handle;
             std::string name;
         };
-    //private:
+
+        struct MXInputEntry {
+            unsigned long prevPacket;
+            bool connected;
+        };
+
+        struct MGameInputEntry {
+            APP_LOCAL_DEVICE_ID appId;
+            //uint64_t sequence;
+            IGameInputDevice* device;
+            bool connected;
+        };
         MInitConfig settings;
 
         std::size_t mask;
@@ -81,9 +100,15 @@ namespace MW {
 
         MGlobal(const MInitConfig& config);
 
+        void initClock();
         void createNotificationWindow();
         void registerRawInputDevices();
+        void decideGamepadBackend();
+        void registerDeviceCallback();
+        void checkConnectedGamepads(); // XInput
 
+        void getGamepadInputG();
+        void getGamepadInputX();        // XInput
         void onMonitorChange();
         void consumeAll();
         void switchBuffers();
@@ -91,7 +116,7 @@ namespace MW {
         bool shouldCoalesce(const MEvent& a);
         size_t findCoalescableEventIndex(const MEventSlot& ev, void* hwnd);
         void coalesceEvent(size_t index, const MEvent& ev);
-    //public:
+
         static MGlobal* init(const MInitConfig& config = {});
         static MGlobal* Get();
         static void shutdown();
@@ -105,14 +130,42 @@ namespace MW {
         std::vector<MDeviceState>* getBackStatePtr()  const;
         bool mouseTracking;
         wchar_t pendingSurrogate; // for WM_CHAR surrogate pair handling
-        bool shouldDeliverToFocused() const { return settings.deliverToFocused; }
+
+        // Gamepads
+
+        bool usingXInput;
+        std::vector<MXInputEntry> gamepadsXI;
+        bool isGamepadConnected(MGamepadID id) const;
+
+        // XInput
+        bool gamepadMightHaveConnected;
+
+        // GameInput
+        std::vector<MGameInputEntry> gamepadsGI;
+        IGameInput* gameInput = nullptr;
+        GameInputCallbackToken deviceToken;
+        std::optional<MGamepadID> toGamepadID(const APP_LOCAL_DEVICE_ID& appId);
+        static constexpr size_t DEVICE_CHANGE_BUFFER_CAPACITY{16};
+        std::unique_ptr<MGameInputEntry[]> devChangeBuffer;
+        alignas(64) std::atomic<size_t> d_head;
+        alignas(64) std::atomic<size_t> d_tail;
+        std::size_t d_mask; // capacity-1
+
+        void pushDevChange(MGameInputEntry&& dc);
+        bool popDevChange(MGameInputEntry& out);
+        
+        
         // Drains the event queue, walks each event through registered handler chains
         void poll();
 
         // Event queue push
         bool push(MEvent&& ev, void* hwnd);
 
-        //bool isRunning();
+        // Clock
+        static constexpr uint64_t microSecConstant { 1000000 };
+        uint64_t qpcFreq;
+        uint64_t qpcStart;
+        MMicroSec getTimeNow();
 
         // Monitor query
         std::vector<MMonitor>   getConnectedMonitors();
@@ -140,8 +193,7 @@ namespace MW {
         float dpiFromHandle(void* hMon);
 
         MPoint getCursorPos();
-
-        // Key state query for between-event polling
+        MMods getMods();
         bool isKeyHeld(MKey key);
     };
 }

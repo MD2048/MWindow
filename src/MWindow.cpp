@@ -63,14 +63,31 @@ namespace MW {
         assert(ptr && "MWindow::isMonitorConnected(): Initialize MWindow before calling this function!"); 
         return ptr->isMonitorConnected(id); }
 
+    
+    bool isGamepadConnected(MGamepadID id) {
+        assert(ptr && "MWindow::isGamepadConnected(): Initialize MWindow before calling this function!"); 
+        return ptr->isGamepadConnected(id);
+    }
+
+
     MPoint getCursorPos() { 
-        assert(ptr && "MWindow::getCursorX(): Initialize MWindow before calling this function!"); 
+        assert(ptr && "MWindow::getCursorPos(): Initialize MWindow before calling this function!"); 
         return ptr->getCursorPos(); 
+    }
+
+    MMods getMods() {
+        assert(ptr && "MWindow::getMods(): Initialize MWindow before calling this function!"); 
+        return ptr->getMods(); 
     }
 
     bool isKeyHeld(MKey key) {
         assert(ptr && "MWindow::isKeyHeld(): Initialize MWindow before calling this function!"); 
         return ptr->isKeyHeld(key); 
+    }
+
+    const std::vector<MDeviceState>& getInputState() {
+        assert(ptr && "MWindow::getInputState(): Initialize MWindow before calling this function!"); 
+        return *(ptr->getFrontStatePtr()); 
     }
 
     [[nodiscard]] std::unique_ptr<MWindow> MWindow::create(const MWindowDesc& desc) {

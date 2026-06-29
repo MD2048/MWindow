@@ -17,6 +17,15 @@ namespace MW {
         Count
     };
 
+    enum class MGamepadButton : uint32_t {
+        DpadUp, DpadDown, DpadLeft, DpadRight,
+        ActionBottom, ActionRight, ActionLeft, ActionTop, // Xbox: A, B, X, Y | PS: Cross, Circle, Square, Triangle
+        BumperLeft, BumperRight,
+        ThumbLeft, ThumbRight, // Stick clicks
+        Start, Select, Guide,
+        Count
+    };
+
     enum class MKey : uint32_t {
         Unknown = 0,
 
@@ -125,6 +134,29 @@ namespace MW {
             default:                    return "Invalid";
         }
     }
+
+    constexpr const char* ToString(MGamepadButton button) {
+        switch (button) {
+            case MGamepadButton::DpadUp:      return "DpadUp";
+            case MGamepadButton::DpadDown:    return "DpadDown";
+            case MGamepadButton::DpadLeft:    return "DpadLeft";
+            case MGamepadButton::DpadRight:   return "DpadRight";
+            case MGamepadButton::ActionBottom:return "ActionBottom";
+            case MGamepadButton::ActionRight: return "ActionRight";
+            case MGamepadButton::ActionLeft:  return "ActionLeft";
+            case MGamepadButton::ActionTop:   return "ActionTop";
+            case MGamepadButton::BumperLeft:  return "BumperLeft";
+            case MGamepadButton::BumperRight: return "BumperRight";
+            case MGamepadButton::ThumbLeft:   return "ThumbLeft";
+            case MGamepadButton::ThumbRight:  return "ThumbRight";
+            case MGamepadButton::Start:       return "Start";
+            case MGamepadButton::Select:      return "Select";
+            case MGamepadButton::Guide:       return "Guide";
+            case MGamepadButton::Count:       return "Count";
+            default:                          return "Invalid";
+        }
+    }
+
     constexpr const char* ToString(MKey key) {
         switch (key) {
             case MKey::Unknown: return "Unknown";

@@ -30,10 +30,12 @@ namespace MW
 
     struct MInitConfig {
         std::size_t     eventQueueCapacity = 256;  // must be power of 2
-        bool deliverToFocused       = true;
+        bool ignoreGamepads         = false;
         bool mouseMoveCoalescing    = true;
-        bool touchMoveCoalescing    = true;
         bool scrollCoalescing       = true;
+        bool touchMoveCoalescing    = true;
+        bool stylusMoveCoalescing   = true;
+        bool gamepadCoalescing      = true;
     };
 
     struct MEventHandlerEntry {

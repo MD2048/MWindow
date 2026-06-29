@@ -27,21 +27,21 @@ namespace MW {
     // Drains the event queue, walks each event through registered handler chains
     void poll();
 
-    //bool isRunning();
-
     MEventHandlerID registerGlobalEventHandler(MEventHandler ha);
     void            unregisterGlobalEventHandler(MEventHandlerID id);
 
-    // Monitor query
     std::vector<MMonitor>   getConnectedMonitors();
     std::optional<MMonitor> getMonitor(MMonitorID id);
     std::optional<MMonitor> getPrimaryMonitor();
     bool                    isMonitorConnected(MMonitorID id);
 
-    MPoint getCursorPos();
+    bool isGamepadConnected(MGamepadID id);
 
-    // Key state query for between-event polling
+    MPoint getCursorPos();
+    MMods getMods();
     bool isKeyHeld(MKey key);
+
+    const std::vector<MDeviceState>& getInputState(); // MUST re-query per frame !!!
     
     class MWindow {
     private:
@@ -61,22 +61,22 @@ namespace MW {
 
         virtual MWindowID getId() const = 0;
 
-        // ── Lifecycle ─────────────────────────────────────────────────────────
         virtual void show()  = 0;
         virtual void hide()  = 0;
         virtual void close() = 0;
 
         [[nodiscard]] virtual bool isAlive() const = 0;
-        [[nodiscard]] virtual bool isVisible() const = 0;  // false when minimized
+        [[nodiscard]] virtual bool isVisible() const = 0;  // false when minimized too
 
-        // ── Properties (all logical) ──────────────────────────────────────────
         virtual void               setTitle(const std::string& title) = 0;
         virtual const std::string& getTitle() const = 0;
+        
+        // Every coordinate in logical desktop space
 
-        virtual void     resize(MSize sz) = 0; // logical
-        virtual MSize getSize()  const = 0;              // logical
+        virtual void     resize(MSize sz) = 0;
+        virtual MSize getSize()  const = 0;
 
-        virtual void  setTopLeftCorner(MPoint p) = 0;    // logical, virtual desktop
+        virtual void  setTopLeftCorner(MPoint p) = 0;
         virtual MPoint getTopLeftCorner() const = 0;
 
         virtual MRect getRect() const = 0;
@@ -84,24 +84,19 @@ namespace MW {
         virtual void        setWindowMode(MWindowMode mode) = 0;
         virtual MWindowMode getWindowMode() const = 0;
 
-        // Which monitor this window currently lives on (dominant monitor)
         virtual MMonitorID getCurrentMonitorID() const = 0;
 
-        // DPI scale of the current monitor
         virtual float getDpiScale() const = 0;
 
-        // ── Rendering ─────────────────────────────────────────────────────────
-        // Physical pixels — pass directly to Vulkan/Metal/DX/GL
+        // Physical pixels - cast to an integer type
         virtual MSize getPhysicalSize() const = 0;
 
         virtual MRenderSurface getRenderSurface() const = 0;
 
-        // ── Factory ───────────────────────────────────────────────────────────
         [[nodiscard]] static std::unique_ptr<MWindow> create(const MWindowDesc& desc);
 
         void* passHandle();
     };
-
-} // namespace MWindow
+}
 
 #endif

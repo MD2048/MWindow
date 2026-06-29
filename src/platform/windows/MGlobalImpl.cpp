@@ -13,9 +13,39 @@
 #include <windowsx.h>
 #include <shellscalingapi.h>
 #include <Dbt.h>
+#include <Xinput.h>
+#include <GameInput.h>
 
 #include <limits>
 #include <cassert>
+#include <cmath>
+
+#define MI_WP_SIGNATURE      0xFF515700
+#define MI_WP_SIGNATURE_MASK 0xFFFFFF00
+#define MI_WP_EVENTMASK      0x000000FF
+
+static constexpr float TRIGGER_THRESHOLD {XINPUT_GAMEPAD_TRIGGER_THRESHOLD / 255.f};
+static constexpr float LEFT_STICK_THRESHOLD_POS {XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE / 32767.f};
+static constexpr float LEFT_STICK_THRESHOLD_NEG {-(XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE / 32768.f)};
+static constexpr float RIGHT_STICK_THRESHOLD_POS {XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE / 32767.f};
+static constexpr float RIGHT_STICK_THRESHOLD_NEG {-(XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE / 32768.f)};
+
+static void CALLBACK OnDeviceConnected(
+    _In_ GameInputCallbackToken callbackToken,
+    _In_ void* context,
+    _In_ IGameInputDevice* device,
+    _In_ uint64_t timestamp,
+    _In_ GameInputDeviceStatus currentStatus,
+    _In_ GameInputDeviceStatus previousStatus) 
+{
+    MW::MGlobal* global {MW::MGlobal::Get()};
+    if(!global) return;
+    if (currentStatus & GameInputDeviceConnected) {
+        global->pushDevChange({device->GetDeviceInfo()->deviceId,device,true});
+    } else {
+        global->pushDevChange({device->GetDeviceInfo()->deviceId,device,false});
+    }
+}
 
 LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
@@ -254,7 +284,7 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         case WM_POINTERENTER: {
             POINTER_INFO pi{};
             if (!GetPointerInfo(GET_POINTERID_WPARAM(wParam), &pi)) return 0;
-            uint64_t ts   = static_cast<uint64_t>(GetMessageTime());
+            MMicroSec ts = global->getTimeNow();
 
             if (pi.pointerType == PT_PEN) {
                 float scale = global->dpiFromHandle(MonitorFromWindow(hwnd,MONITOR_DEFAULTTONEAREST));
@@ -273,7 +303,7 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         case WM_POINTERLEAVE: {
             POINTER_INFO pi{};
             if (!GetPointerInfo(GET_POINTERID_WPARAM(wParam), &pi)) return 0;
-            uint64_t ts   = static_cast<uint64_t>(GetMessageTime());
+            MMicroSec ts = global->getTimeNow();
 
             if (pi.pointerType == PT_PEN) {
                 float scale = global->dpiFromHandle(MonitorFromWindow(hwnd,MONITOR_DEFAULTTONEAREST));
@@ -292,7 +322,7 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         case WM_POINTERDOWN: {
             POINTER_INFO pi{};
             if (!GetPointerInfo(GET_POINTERID_WPARAM(wParam), &pi)) return 0;
-            uint64_t ts   = static_cast<uint64_t>(GetMessageTime());
+            MMicroSec ts = global->getTimeNow();
 
             float scale = global->dpiFromHandle(MonitorFromWindow(hwnd,MONITOR_DEFAULTTONEAREST));
             MPoint  pos   = { pi.ptPixelLocation.x / scale,
@@ -321,7 +351,7 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         case WM_POINTERUPDATE: {
             POINTER_INFO pi{};
             if (!GetPointerInfo(GET_POINTERID_WPARAM(wParam), &pi)) return 0;
-            uint64_t ts   = static_cast<uint64_t>(GetMessageTime());
+            MMicroSec ts = global->getTimeNow();
 
             float scale = global->dpiFromHandle(MonitorFromWindow(hwnd,MONITOR_DEFAULTTONEAREST));
             MPoint   pos   = { pi.ptPixelLocation.x / scale,
@@ -361,7 +391,7 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         case WM_POINTERUP: {
             POINTER_INFO pi{};
             if (!GetPointerInfo(GET_POINTERID_WPARAM(wParam), &pi)) return 0;
-            uint64_t ts    = static_cast<uint64_t>(GetMessageTime());
+            MMicroSec ts = global->getTimeNow();
 
             float scale = global->dpiFromHandle(MonitorFromWindow(hwnd,MONITOR_DEFAULTTONEAREST));
             MPoint   pos   = { pi.ptPixelLocation.x / scale,
@@ -388,7 +418,7 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         case WM_POINTERCAPTURECHANGED: {
             POINTER_INFO pi{};
             if (!GetPointerInfo(GET_POINTERID_WPARAM(wParam), &pi)) return 0;
-            uint64_t ts = static_cast<uint64_t>(GetMessageTime());
+    MMicroSec ts = global->getTimeNow();
 
             if (pi.pointerType == PT_TOUCH) {
                 auto& touchst = std::get<MTouchState>((*global->getBackStatePtr())[static_cast<size_t>(MDeviceType::Touchscreen)]);
@@ -434,9 +464,9 @@ LRESULT CALLBACK NotificationWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                 return 0;
 
             auto* raw = reinterpret_cast<RAWINPUT*>(buf.data());
-            if(raw->header.hDevice == nullptr) return 0;
+            //if(raw->header.hDevice == nullptr) return 0;
             
-            uint64_t timestamp_ms = static_cast<uint64_t>(GetMessageTime());
+            MMicroSec ts = global->getTimeNow();
 
             switch (raw->header.dwType) {
 
@@ -458,12 +488,12 @@ LRESULT CALLBACK NotificationWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                     if(pressed)
                     {
                         kbs.held.set(static_cast<size_t>(key));
-                        global->push(MKeyPressEvent{ timestamp_ms, key, kbs.mods}, nullptr);
+                        global->push(MKeyPressEvent{ ts, key, kbs.mods}, nullptr);
                     }
                     else
                     {
                         kbs.held.reset(static_cast<size_t>(key));
-                        global->push(MKeyReleaseEvent{ timestamp_ms, key, kbs.mods}, nullptr);
+                        global->push(MKeyReleaseEvent{ ts, key, kbs.mods}, nullptr);
                     }
                     break;
                 }
@@ -506,7 +536,7 @@ LRESULT CALLBACK NotificationWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                             dy = ms.lLastY / scale;
                         }
 
-                        global->push(MMouseMoveEvent{timestamp_ms, dx, dy}, nullptr);
+                        global->push(MMouseMoveEvent{ts, dx, dy}, nullptr);
                     }
 
                     // usButtonFlags is a bitmask — multiple buttons can change in one message
@@ -527,25 +557,25 @@ LRESULT CALLBACK NotificationWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                     for (auto& [downFlag, upFlag, button] : kButtonMap) {
                         if (ms.usButtonFlags & downFlag) {
                             msst.buttons.set(static_cast<size_t>(button));
-                            global->push(MMouseButtonPressEvent{ timestamp_ms, button, msst.p,
+                            global->push(MMouseButtonPressEvent{ ts, button, msst.p,
                                 std::get<MKeyboardState>((*state)[(size_t)MW::MDeviceType::Keyboard]).mods}, nullptr);
                         }
                         if (ms.usButtonFlags & upFlag) {
                             msst.buttons.reset(static_cast<size_t>(button));
-                            global->push(MMouseButtonReleaseEvent{ timestamp_ms, button, msst.p,
+                            global->push(MMouseButtonReleaseEvent{ ts, button, msst.p,
                             std::get<MKeyboardState>((*state)[(size_t)MW::MDeviceType::Keyboard]).mods}, nullptr);
                         }
                     }
 
                     if (ms.usButtonFlags & RI_MOUSE_WHEEL) {
                         float dy = static_cast<short>(ms.usButtonData) / (float)WHEEL_DELTA;
-                        global->push(MMouseScrollEvent{timestamp_ms, 0.f, dy,
+                        global->push(MMouseScrollEvent{ts, 0.f, dy,
                         std::get<MKeyboardState>((*state)[(size_t)MW::MDeviceType::Keyboard]).mods}, nullptr);
                     }
 
                     if (ms.usButtonFlags & RI_MOUSE_HWHEEL) {
                         float dx = static_cast<short>(ms.usButtonData) / (float)WHEEL_DELTA;
-                        global->push(MMouseScrollEvent{timestamp_ms, dx, 0.f,
+                        global->push(MMouseScrollEvent{ts, dx, 0.f,
                         std::get<MKeyboardState>((*state)[(size_t)MW::MDeviceType::Keyboard]).mods}, nullptr);
                     }
                     break;
@@ -621,8 +651,9 @@ LRESULT CALLBACK NotificationWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             switch(wParam)
             {
                 case DBT_DEVICEARRIVAL:
-                case DBT_DEVICEREMOVECOMPLETE:
                 case DBT_DEVNODES_CHANGED:
+                    global->gamepadMightHaveConnected = true;
+                case DBT_DEVICEREMOVECOMPLETE:
                 {
                     for (const auto& old_mon : oldM) {
                         auto it = std::find_if(newM.begin(), newM.end(),
@@ -666,7 +697,6 @@ namespace MW {
             assert(ok);
         }
         EnableMouseInPointer(FALSE);
-
         buildScanTable();
 
         WNDCLASSEXW wc{};
@@ -677,10 +707,12 @@ namespace MW {
         wc.hCursor = LoadCursor(NULL, IDC_ARROW);
         RegisterClassExW(&wc);
 
-
+        ptr->initClock();
         ptr->createNotificationWindow();
         ptr->registerRawInputDevices();
         ptr->enumerateMonitors(ptr->monitors);
+        if(!config.ignoreGamepads)
+            ptr->decideGamepadBackend();
 
         ptr->statebuf1 = ptr->statebuf2;
 
@@ -699,6 +731,8 @@ namespace MW {
     , tail{0}
     , notificationHWND{nullptr}
     , mouseTracking{false}
+    , gamepadMightHaveConnected{false}
+    , pendingSurrogate{}
     {
         // initialize merged MGlobalBase members
         settings = config;
@@ -716,6 +750,11 @@ namespace MW {
         for(size_t i{0};i < WINDOWS_DEVICE_COUNT;++i)
             initializeDeviceState(statebuf2[i]);
 
+        devChangeBuffer = std::make_unique<MGameInputEntry[]>(DEVICE_CHANGE_BUFFER_CAPACITY);
+        d_head.store(0,std::memory_order_release);
+        d_tail.store(0,std::memory_order_release);
+        d_mask = DEVICE_CHANGE_BUFFER_CAPACITY-1;
+
         front_buf.store(&statebuf1, std::memory_order_release);
         back_buf.store(&statebuf2, std::memory_order_release);
 
@@ -730,6 +769,13 @@ namespace MW {
     }
 
     MGlobal::~MGlobal() {
+        uint64_t temp{};
+        if(deviceToken)
+            gameInput->UnregisterCallback(deviceToken, temp);
+        if(gameInput) {
+            gameInput->Release();
+            gameInput = nullptr;
+        }
         PostMessageW(reinterpret_cast<HWND>(notificationHWND), WM_CLOSE, 0, 0);
         for(auto& entry : windows)
         {
@@ -765,11 +811,17 @@ namespace MW {
             TranslateMessage(&msg); // generates WM_CHAR from WM_KEYDOWN
             DispatchMessage(&msg);  // routes to WndProc
         }
+        if(!settings.ignoreGamepads)
+        {
+            if(usingXInput)
+                getGamepadInputX();
+            else
+                getGamepadInputG();
+        }
+            
         switchBuffers();
         consumeAll();
     }
-
-    //bool isRunning();
 
     // Monitor query
     std::vector<MMonitor>        MGlobal::getConnectedMonitors() {
@@ -804,6 +856,16 @@ namespace MW {
 
     std::vector<MDeviceState>* MGlobal::getFrontStatePtr() const { return front_buf.load(std::memory_order_acquire); }
     std::vector<MDeviceState>* MGlobal::getBackStatePtr()  const { return back_buf.load(std::memory_order_acquire); }
+
+    bool MGlobal::isGamepadConnected(MGamepadID id) const { return gamepadsXI[id].connected; }
+
+    std::optional<MGamepadID> MGlobal::toGamepadID(const APP_LOCAL_DEVICE_ID& appId) {
+        for(size_t i{0};i < gamepadsGI.size();++i) {
+            if(!std::memcmp(gamepadsGI[i].appId.value,appId.value,APP_LOCAL_DEVICE_ID_SIZE))
+                return i;
+        }
+        return std::nullopt;
+    }
 
     MWindowID MGlobal::registerWindow(void* hwnd, MWindowImpl* ptr) {
         std::unique_lock lock(window_lock);
@@ -949,6 +1011,10 @@ namespace MW {
         return std::get<MMouseState>((*getBackStatePtr())[(size_t)MW::MDeviceType::Mouse]).p;
     }
 
+    MMods MGlobal::getMods() {
+        return std::get<MKeyboardState>((*getBackStatePtr())[(size_t)MW::MDeviceType::Keyboard]).mods;
+    }
+
     bool MGlobal::isKeyHeld(MKey key) {
         return std::get<MKeyboardState>((*getBackStatePtr())[(size_t)MW::MDeviceType::Keyboard]).held.test(static_cast<size_t>(key));
     }
@@ -970,7 +1036,7 @@ namespace MW {
             slot.global = false;
         }
         else {
-            if(isAffectedByDeliverToFocused(ev) && shouldDeliverToFocused())
+            if(shouldBeDeliveredToFocused(ev))
             {
                 auto opt = getFocusedID();
                 if(!opt)
@@ -1028,15 +1094,19 @@ namespace MW {
 
     bool MGlobal::shouldCoalesce(const MEvent& a) {
         return std::visit(Overloaded {
-            [b = settings.mouseMoveCoalescing](const MMouseMoveEvent& ev) { return b; },
-            [b = settings.scrollCoalescing](const MMouseScrollEvent& ev)  { return b; },
-            [b = settings.touchMoveCoalescing](const MTouchMoveEvent& ev) { return b; },
+            [b = settings.mouseMoveCoalescing](const MMouseMoveEvent& ev)   { return b; },
+            [b = settings.scrollCoalescing](const MMouseScrollEvent& ev)    { return b; },
+            [b = settings.touchMoveCoalescing](const MTouchMoveEvent& ev)   { return b; },
+            [b = settings.stylusMoveCoalescing](const MStylusMoveEvent& ev) { return b; },
 
             [](const MResizeEvent& ev) { return true; },
             [](const MMoveEvent& ev) { return true; },
             [](const MVisibilityChangeEvent& ev) { return true; },
             [](const MFocusChangeEvent& ev) { return true; },
             [](const MCharEvent& ev) { return true; },
+
+            [b = settings.gamepadCoalescing](const MGamepadTriggerEvent& ev) { return true; },
+            [b = settings.gamepadCoalescing](const MGamepadStickEvent& ev) { return true; },
 
             [](const auto&) { return false; }
         }, a);
@@ -1050,12 +1120,16 @@ namespace MW {
             [](const MMouseMoveEvent& ev1, const MMouseMoveEvent& ev2) { return true; },
             [](const MMouseScrollEvent& ev1, const MMouseScrollEvent& ev2) { return true; },
             [](const MTouchMoveEvent& ev1, const MTouchMoveEvent& ev2) { return ev1.id == ev2.id; },
+            [](const MStylusMoveEvent& ev1, const MStylusMoveEvent& ev2) { return true; },
 
             [](const MResizeEvent& ev1, const MResizeEvent& ev2) { return true; },
             [](const MMoveEvent& ev1, const MMoveEvent& ev2) { return true; },
             [](const MVisibilityChangeEvent& ev1, const MVisibilityChangeEvent& ev2) { return true; },
             [](const MFocusChangeEvent& ev1, const MFocusChangeEvent& ev2) { return true; },
             [](const MCharEvent& ev1, const MCharEvent& ev2) { return true; },
+
+            [](const MGamepadTriggerEvent& ev1, const MGamepadTriggerEvent& ev2) { return (ev1.id == ev2.id) && (ev1.left == ev2.left); },
+            [](const MGamepadStickEvent& ev1, const MGamepadStickEvent& ev2) { return (ev1.id == ev2.id) && (ev1.left == ev2.left); },
 
             [](const auto&, const auto&) { return false; }
         }, a.event, b.event);
@@ -1089,12 +1163,29 @@ namespace MW {
                 e.dx += std::get<MTouchMoveEvent>(ev).dx;
                 e.dy += std::get<MTouchMoveEvent>(ev).dy;
             },
+            [ev](MStylusMoveEvent& e) { e.timestamp = std::get<MStylusMoveEvent>(ev).timestamp;
+                e.new_pos = std::get<MStylusMoveEvent>(ev).new_pos;
+                e.dx += std::get<MStylusMoveEvent>(ev).dx;
+                e.dy += std::get<MStylusMoveEvent>(ev).dy;
+            },
 
             [ev](MResizeEvent& e) { e.new_size = std::get<MResizeEvent>(ev).new_size; },
             [ev](MMoveEvent& e) { e.new_pos = std::get<MMoveEvent>(ev).new_pos; },
             [ev](MVisibilityChangeEvent& e) { e.isVisible = std::get<MVisibilityChangeEvent>(ev).isVisible; },
             [ev](MFocusChangeEvent& e) { e.focused = std::get<MFocusChangeEvent>(ev).focused; },
             [ev](MCharEvent& e) { e.input += std::get<MCharEvent>(ev).input; },
+
+            [ev](MGamepadTriggerEvent& e) { auto& gt = std::get<MGamepadTriggerEvent>(ev);
+                e.timestamp = gt.timestamp;
+                e.new_val = gt.new_val;
+                e.d += gt.d;
+            },
+            [ev](MGamepadStickEvent& e) { auto& gs = std::get<MGamepadStickEvent>(ev);
+                e.timestamp = gs.timestamp;
+                e.new_val = gs.new_val;
+                e.dx += gs.dx;
+                e.dy += gs.dy;
+            },
 
             [](auto&) {}
         }, slot.event);
@@ -1109,6 +1200,11 @@ namespace MW {
             entry.window->syncState();
     }
 
+    MMicroSec MGlobal::getTimeNow() {
+        LARGE_INTEGER l;
+        QueryPerformanceCounter(&l);
+        return (l.QuadPart - qpcStart) * microSecConstant / qpcFreq;
+    }
 
     void MGlobal::executeGlobalHandlerChain(const MEvent& ev) {
         std::lock_guard<std::mutex> lock(handler_lock);
@@ -1146,6 +1242,15 @@ namespace MW {
         {
             entry.window->onMonitorChange();
         }
+    }
+    
+    void MGlobal::initClock() {
+        LARGE_INTEGER temp;
+        QueryPerformanceFrequency(&temp);
+        qpcFreq = temp.QuadPart;
+
+        QueryPerformanceCounter(&temp);
+        qpcStart = temp.QuadPart;
     }
 
     void MGlobal::createNotificationWindow()
@@ -1190,6 +1295,324 @@ namespace MW {
             std::cout << GetLastError() << '\n';
             assert(ok);
         }
+    }
+
+    void MGlobal::pushDevChange(MGameInputEntry&& dc) {
+        const size_t h = d_head.load(std::memory_order_relaxed);
+        const size_t t = d_tail.load(std::memory_order_acquire);
+
+        if((h - t) >= DEVICE_CHANGE_BUFFER_CAPACITY) {
+            return;
+        }
+
+        devChangeBuffer[h & d_mask] = std::move(dc);
+
+        d_head.store(h + 1, std::memory_order_release);
+    }
+
+    bool MGlobal::popDevChange(MGameInputEntry& out) {
+        const size_t t = d_tail.load(std::memory_order_relaxed);
+        const size_t h = d_head.load(std::memory_order_acquire);
+
+        if(t == h) {
+            return false;
+        }
+
+        out = devChangeBuffer[t & d_mask];
+
+        d_tail.store(t + 1, std::memory_order_release);
+        return true;
+    }
+
+    void MGlobal::decideGamepadBackend() {
+        HRESULT hr = GameInputCreate(&gameInput);
+        if (SUCCEEDED(hr)) {
+            gamepadsGI.reserve(DEFAULT_GAMEPAD_COUNT);
+            usingXInput = false;
+            registerDeviceCallback();
+        }
+        else {
+            gamepadsXI = std::vector<MXInputEntry>(DEFAULT_GAMEPAD_COUNT);
+            usingXInput = true;
+            checkConnectedGamepads();
+        }
+    }
+
+    void MGlobal::registerDeviceCallback() {
+        gameInput->RegisterDeviceCallback(
+            nullptr,
+            GameInputKindGamepad,
+            GameInputDeviceAnyStatus,
+            GameInputBlockingEnumeration,
+            this,
+            OnDeviceConnected,
+            &deviceToken
+        );
+    }
+
+    void MGlobal::getGamepadInputG() {
+        MMicroSec ts = getTimeNow();
+        auto* state = getBackStatePtr();
+        MGameInputEntry c{};
+        while(popDevChange(c))
+        {
+            if(c.connected) {
+                size_t i{0};
+                for(;i < gamepadsGI.size()+1;++i)
+                {
+                    if(i == gamepadsGI.size()) {
+                        gamepadsGI.push_back(c);
+                        (*state).push_back(MGamepadState{true,{},{},{},0.f,0.f});
+                        break;
+                    }
+                    if(!gamepadsGI[i].connected)
+                    {
+                        gamepadsGI[i].connected = true;
+                        std::get<MGamepadState>((*state)[static_cast<size_t>(MDeviceType::Gamepad)+i]).connected = true;
+                        break;
+                    }
+                }
+                push(MGamepadConnectedEvent{i},nullptr);
+            }
+            else {
+                auto opt = toGamepadID(c.appId);
+                if(!opt) continue;
+                MGamepadID id = opt.value();
+
+                push(MGamepadDisconnectedEvent{id}, nullptr);
+                gamepadsGI[id] = {{},nullptr,false};
+                std::get<MGamepadState>((*state)[static_cast<size_t>(MDeviceType::Gamepad)+id]) = {false,{},{},{},0.f,0.f};
+            }
+        }
+
+        for(size_t i{0};i < gamepadsGI.size();++i)
+        {
+            IGameInputReading* reading = nullptr;
+
+            if (SUCCEEDED(gameInput->GetCurrentReading(GameInputKindGamepad, gamepadsGI[i].device, &reading))) {
+                
+                GameInputGamepadState gamepadState;
+                if (reading->GetGamepadState(&gamepadState)) {
+                    
+                    struct GameInputButtonMap {
+                        GameInputGamepadButtons gButton;
+                        MGamepadButton mButton;
+                    };
+
+                    static constexpr GameInputButtonMap bMap[] = {
+                        { GameInputGamepadDPadUp,              MGamepadButton::DpadUp },
+                        { GameInputGamepadDPadDown,            MGamepadButton::DpadDown },
+                        { GameInputGamepadDPadLeft,            MGamepadButton::DpadLeft },
+                        { GameInputGamepadDPadRight,           MGamepadButton::DpadRight },
+                        { GameInputGamepadMenu,                MGamepadButton::Start },
+                        { GameInputGamepadView,                MGamepadButton::Select },
+                        { GameInputGamepadA,                   MGamepadButton::ActionBottom },
+                        { GameInputGamepadB,                   MGamepadButton::ActionRight },
+                        { GameInputGamepadX,                   MGamepadButton::ActionLeft },
+                        { GameInputGamepadY,                   MGamepadButton::ActionTop },
+                        { GameInputGamepadLeftShoulder,       MGamepadButton::BumperLeft },
+                        { GameInputGamepadRightShoulder,      MGamepadButton::BumperRight },
+                        { GameInputGamepadLeftThumbstick,     MGamepadButton::ThumbLeft },
+                        { GameInputGamepadRightThumbstick,    MGamepadButton::ThumbRight }
+                    };
+
+                    auto& gpst = std::get<MGamepadState>((*state)[static_cast<size_t>(MDeviceType::Gamepad) + i]);
+                    const uint64_t buttonBits = static_cast<uint64_t>(gamepadState.buttons);
+                    for (auto [flag, bt] : bMap) {
+                        const bool isPressed = (buttonBits & static_cast<uint64_t>(flag)) != 0;
+                        if (isPressed != gpst.held[static_cast<size_t>(bt)]) {
+                            if (isPressed) {
+                                push(MGamepadButtonPressEvent{ts, i, bt}, nullptr);
+                                gpst.held.set(static_cast<size_t>(bt));
+                            } else {
+                                push(MGamepadButtonReleaseEvent{ts, i, bt}, nullptr);
+                                gpst.held.reset(static_cast<size_t>(bt));
+                            }
+                        }
+                    }
+                    auto normalizeTrigger = [](float tr){
+                        if(tr < TRIGGER_THRESHOLD)          // using the thresholds from XInput
+                            return 0.f;
+                        return tr;
+                    };
+                    float leftTrigger  = normalizeTrigger(gamepadState.leftTrigger);
+                    float rightTrigger = normalizeTrigger(gamepadState.rightTrigger);
+
+                    if(leftTrigger != gpst.leftTrigger)
+                    {
+                        push(MGamepadTriggerEvent{ts,i,true,leftTrigger,leftTrigger-gpst.leftTrigger}, nullptr);
+                        gpst.leftTrigger = leftTrigger;
+                    }
+                    if(rightTrigger != gpst.rightTrigger)
+                    {
+                        push(MGamepadTriggerEvent{ts,i,false,rightTrigger,rightTrigger-gpst.rightTrigger}, nullptr);
+                        gpst.rightTrigger = rightTrigger;
+                    }
+
+                    MStick left  {gamepadState.leftThumbstickX,  gamepadState.leftThumbstickY};
+                    MStick right {gamepadState.rightThumbstickX, gamepadState.rightThumbstickY};
+
+                    float len = sqrt(left.x*left.x + left.y*left.y);
+                    if(LEFT_STICK_THRESHOLD_NEG < len && len < LEFT_STICK_THRESHOLD_POS)
+                        left = {0,0};
+                    
+                    len = sqrt(right.x*right.x + right.y*right.y);
+                    if(RIGHT_STICK_THRESHOLD_NEG < len && len < RIGHT_STICK_THRESHOLD_POS)
+                        right = {0,0};
+                    
+                    if(left != gpst.left)
+                    {
+                        push(MGamepadStickEvent{ts,i,true,left,
+                            left.x-gpst.left.x, left.y-gpst.left.y},nullptr);
+                        gpst.left = left;
+                    }
+                    if(right != gpst.right)
+                    {
+                        push(MGamepadStickEvent{ts,i,false,right,
+                            right.x-gpst.right.x, right.y-gpst.right.y},nullptr);
+                        gpst.right = right;
+                    }
+                }
+                reading->Release(); 
+            }
+        }
+    }
+
+    void MGlobal::checkConnectedGamepads() {
+        for(size_t i{0};i < DEFAULT_GAMEPAD_COUNT;++i) {
+            XINPUT_STATE currentState;
+            ZeroMemory(&currentState, sizeof(XINPUT_STATE));
+
+            DWORD result = XInputGetState(static_cast<DWORD>(i), &currentState);
+
+            if (result == ERROR_SUCCESS) {
+                push( MGamepadConnectedEvent{i}, nullptr);
+                std::get<MW::MGamepadState>((*getBackStatePtr())[static_cast<size_t>(MW::MDeviceType::Gamepad) + i]).connected = true;
+                gamepadsXI[i].connected = true;
+                gamepadsXI[i].prevPacket = (unsigned long)currentState.dwPacketNumber;
+            }
+        }
+        gamepadMightHaveConnected = false;
+    }
+
+    void MGlobal::getGamepadInputX() {
+        for(size_t i{0};i < DEFAULT_GAMEPAD_COUNT;++i)
+        {
+            if(!gamepadsXI[i].connected && !gamepadMightHaveConnected) continue;
+
+            XINPUT_STATE currentState;
+            ZeroMemory(&currentState, sizeof(XINPUT_STATE));
+
+            DWORD result = XInputGetState(static_cast<DWORD>(i), &currentState);
+
+            if(result == ERROR_DEVICE_NOT_CONNECTED)
+            {   
+                if(gamepadsXI[i].connected) {
+                    push(MGamepadDisconnectedEvent{i},nullptr);
+                    gamepadsXI[i].connected = false;
+                    std::get<MW::MGamepadState>((*getBackStatePtr())[static_cast<size_t>(MW::MDeviceType::Gamepad) + i]) = {};
+                }
+                continue;
+            }
+            if(!gamepadsXI[i].connected)
+            {
+                push(MGamepadConnectedEvent{i},nullptr);
+                gamepadsXI[i].connected = true;
+            }
+            if((DWORD)gamepadsXI[i].prevPacket == currentState.dwPacketNumber)
+                continue;
+
+            MMicroSec ts = getTimeNow();
+
+            struct XInputButtonMap {
+                USHORT flag;
+                MGamepadButton button;
+            };
+
+            static constexpr XInputButtonMap xMap[] = {
+                { XINPUT_GAMEPAD_DPAD_UP,        MGamepadButton::DpadUp },
+                { XINPUT_GAMEPAD_DPAD_DOWN,      MGamepadButton::DpadDown },
+                { XINPUT_GAMEPAD_DPAD_LEFT,      MGamepadButton::DpadLeft },
+                { XINPUT_GAMEPAD_DPAD_RIGHT,     MGamepadButton::DpadRight },
+                { XINPUT_GAMEPAD_START,          MGamepadButton::Start },
+                { XINPUT_GAMEPAD_BACK,           MGamepadButton::Select },
+                { XINPUT_GAMEPAD_LEFT_THUMB,     MGamepadButton::ThumbLeft },
+                { XINPUT_GAMEPAD_RIGHT_THUMB,    MGamepadButton::ThumbRight },
+                { XINPUT_GAMEPAD_LEFT_SHOULDER,  MGamepadButton::BumperLeft },
+                { XINPUT_GAMEPAD_RIGHT_SHOULDER, MGamepadButton::BumperRight },
+                { XINPUT_GAMEPAD_A,              MGamepadButton::ActionBottom },
+                { XINPUT_GAMEPAD_B,              MGamepadButton::ActionRight },
+                { XINPUT_GAMEPAD_X,              MGamepadButton::ActionLeft },
+                { XINPUT_GAMEPAD_Y,              MGamepadButton::ActionTop },
+            };
+
+            auto& gpst = std::get<MGamepadState>((*getBackStatePtr())[static_cast<size_t>(MDeviceType::Gamepad)+i]);
+            auto& input = currentState.Gamepad;
+            for(auto[flag, bt] : xMap) {
+                bool b = (input.wButtons & flag);
+                if(b != gpst.held[static_cast<size_t>(bt)]) {
+                    if(b)
+                    {
+                        push(MGamepadButtonPressEvent{ts, i, bt},nullptr);
+                        gpst.held.set(static_cast<size_t>(bt));
+                    }
+                    else {
+                        push(MGamepadButtonReleaseEvent{ts, i, bt},nullptr);
+                        gpst.held.reset(static_cast<size_t>(bt));
+                    }
+                }
+            }
+            auto normalizeTrigger = [](BYTE tr){
+                if(tr < XINPUT_GAMEPAD_TRIGGER_THRESHOLD)
+                    tr = 0;
+                return (float)tr / 255.f;
+            };
+            float leftTrigger = normalizeTrigger(input.bLeftTrigger);
+            float rightTrigger = normalizeTrigger(input.bRightTrigger);
+
+            if(leftTrigger != gpst.leftTrigger)
+            {
+                push(MGamepadTriggerEvent{ts,i,true,leftTrigger,leftTrigger-gpst.leftTrigger}, nullptr);
+                gpst.leftTrigger = leftTrigger;
+            }
+            if(rightTrigger != gpst.rightTrigger)
+            {
+                push(MGamepadTriggerEvent{ts,i,false,rightTrigger,rightTrigger-gpst.rightTrigger}, nullptr);
+                gpst.rightTrigger = rightTrigger;
+            }
+
+            auto normalizeStick = [](float x, float y) {
+                if     (x > 0) x /= 32767.f;
+                else if(x < 0) x /= 32768.f;
+                if     (y > 0) y /= 32767.f;
+                else if(y < 0) y /= 32768.f;
+                return MStick{x, y};
+            };
+            MStick left  = normalizeStick((float)input.sThumbLX,(float)input.sThumbLY);
+            MStick right = normalizeStick((float)input.sThumbRX,(float)input.sThumbRY);
+
+            float len = sqrt(left.x*left.x + left.y*left.y);
+            if(LEFT_STICK_THRESHOLD_NEG < len && len < LEFT_STICK_THRESHOLD_POS)
+                left = {0,0};
+            
+            len = sqrt(right.x*right.x + right.y*right.y);
+            if(RIGHT_STICK_THRESHOLD_NEG < len && len < RIGHT_STICK_THRESHOLD_POS)
+                right = {0,0};
+            
+            if(left != gpst.left)
+            {
+                push(MGamepadStickEvent{ts,i,true,left,
+                    left.x-gpst.left.x, left.y-gpst.left.y},nullptr);
+                gpst.left = left;
+            }
+            if(right != gpst.right)
+            {
+                push(MGamepadStickEvent{ts,i,false,right,
+                    right.x-gpst.right.x, right.y-gpst.right.y},nullptr);
+                gpst.right = right;
+            }
+        }
+        gamepadMightHaveConnected = false;
     }
 
     void MGlobal::enumerateMonitors(std::vector<MMonitor>& vec)

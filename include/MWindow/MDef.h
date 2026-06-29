@@ -6,8 +6,8 @@
 namespace MW
 {
     struct MPoint {
-        float x{ 0 };
-        float y{ 0 };
+        float x{ 0.f };
+        float y{ 0.f };
 
         constexpr MPoint() = default;
         constexpr MPoint(float x, float y) noexcept : x(x), y(y) {}
@@ -27,8 +27,8 @@ namespace MW
     };
 
     struct MSize {
-        float width{ 0 };
-        float height{ 0 };
+        float width{ 0.f };
+        float height{ 0.f };
 
         constexpr MSize() = default;
         constexpr MSize(float w, float h) noexcept : width(w), height(h) {}
@@ -42,10 +42,10 @@ namespace MW
     };
     
     struct MRect {
-        float x{ 0 };       // stores top left corner
-        float y{ 0 };       // y increases downwards
-        float width{ 0 };
-        float height{ 0 };
+        float x{ 0.f };       // stores top left corner
+        float y{ 0.f };       // y increases downwards
+        float width{ 0.f };
+        float height{ 0.f };
 
         constexpr MRect() = default;
         constexpr MRect(float x, float y, float w, float h) noexcept
@@ -66,8 +66,18 @@ namespace MW
         friend std::ostream& operator<<(std::ostream& os, const MRect& r) {
             return os << "[" << r.x << ", " << r.y << ", " << r.width << "x" << r.height << "]";
         }
+    };
+    
+    struct MStick {
+        float x{ 0.f }; // always 1 >=, >= -1
+        float y{ 0.f };
 
-    };   
+        constexpr MStick() = default;
+        constexpr MStick(float x, float y) noexcept : x(x), y(y) {}
+
+        constexpr bool operator==(const MStick& other) const noexcept { return x == other.x && y == other.y; }
+        constexpr bool operator!=(const MStick& other) const noexcept { return !(*this == other); }
+    };
 }
 
 

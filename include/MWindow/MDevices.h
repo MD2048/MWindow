@@ -11,27 +11,23 @@
 
 namespace MW
 {
-    using MDeviceID = uint64_t;
+    constexpr int DEFAULT_GAMEPAD_COUNT{4};
+
+    using MGamepadID = uint64_t; // 0 to 3
 
     enum class MDeviceType   { Unknown = -1, Keyboard, Mouse, Touchscreen, Stylus, Gamepad };
-    // Gamepad = Controller
 
     struct MMods {
         bool shift : 1;
         bool ctrl  : 1;
         bool alt   : 1;
-        bool super : 1;   // Win / Cmd
+        bool gui   : 1;   // Win / Cmd
         bool caps  : 1;   // CapsLock state, not the key itself
         bool num   : 1;   // NumLock state
 
-        bool none() const { return !shift && !ctrl && !alt && !super; }
+        bool none() const { return !shift && !ctrl && !alt && !gui; }
         void update(MKey k, bool press)
         {
-            /*LeftShift,  RightShift,
-        LeftCtrl,   RightCtrl,
-        LeftAlt,    RightAlt,   // RightAlt = AltGr on European keyboards —
-                                // generates RI_KEY_E0 on the same MakeCode as LeftAlt
-        LeftGui,    RightGui,*/
             switch(k)
             {
                 case MKey::LeftShift:
@@ -45,7 +41,7 @@ namespace MW
                     alt = press; return;
                 case MKey::LeftGui:
                 case MKey::RightGui:
-                    super = press; return;
+                    gui = press; return;
                 case MKey::CapsLock:
                     if(press) caps = !caps; return;
                 case MKey::NumLock:
@@ -68,8 +64,18 @@ namespace MW
         std::unordered_map<uint32_t, MPoint> activePoints; // touch id → point
     };
 
-    // Reserved — no fields yet, just a placeholder so the variant compiles
-    struct MGamepadState {};
+    struct MGamepadState {
+        bool connected = false;
+
+        std::bitset<static_cast<size_t>(MGamepadButton::Count)> held;
+
+        MStick left;        // -1.f to 1.f
+        MStick right;
+
+        float leftTrigger = 0.f;  // 0.f to 1.f
+        float rightTrigger = 0.f;
+    };
+    
     struct MStylusState  {
         bool    inRange   = false;
         bool    inContact = false;
@@ -95,23 +101,20 @@ namespace MW
         }
     }
 
-    // 3. MMods Formatter
     inline std::ostream& operator<<(std::ostream& os, const MMods& mods) {
         os << "[ ";
         if (mods.shift) os << "Shift ";
         if (mods.ctrl)  os << "Ctrl ";
         if (mods.alt)   os << "Alt ";
-        if (mods.super) os << "Super ";
+        if (mods.gui) os << "Super ";
         if (mods.caps)  os << "Caps ";
         if (mods.num)   os << "Num ";
         
-        // Print "None" if all action modifiers are false and toggles are off
         if (mods.none() && !mods.caps && !mods.num) os << "None ";
         os << "]";
         return os;
     }
 
-    // 4. State Formatters
     inline std::ostream& operator<<(std::ostream& os, const MKeyboardState& state) {
         os << "  Keyboard State:\n"
         << "    Keys Held:  " << state.held.count() << " active\n"
@@ -139,7 +142,6 @@ namespace MW
         return os;
     }
 
-    // 5. MDeviceState (Variant) Formatter
     template<class... Ts>
     struct OVL : Ts...
     {
