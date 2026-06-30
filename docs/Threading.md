@@ -22,7 +22,7 @@ MSize     phys    = window->getPhysicalSize();
 ```
 
 **Exception:** `MW::getInputState()` returns a reference to internal state. Do not cache this reference across frames — re-query it each frame.
-More on this [here](docs/Input.md#state-vector).
+More on this [here](Input.md#state-vector).
 
 ## Writing State — Command Queue
 
