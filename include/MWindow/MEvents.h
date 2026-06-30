@@ -156,31 +156,31 @@ namespace MW {
 
     struct MGamepadConnectedEvent {
         MMicroSec timestamp;
-        MGamepadID id;
+        MGamepadSlot id;
     };
 
     struct MGamepadDisconnectedEvent {
         MMicroSec timestamp;
-        MGamepadID id;
+        MGamepadSlot id;
     };
 
     struct MGamepadButtonPressEvent {
         MMicroSec timestamp;
-        MGamepadID id;
+        MGamepadSlot id;
 
         MGamepadButton button;
     };
 
     struct MGamepadButtonReleaseEvent {
         MMicroSec timestamp;
-        MGamepadID id;
+        MGamepadSlot id;
 
         MGamepadButton button;
     };
 
     struct MGamepadTriggerEvent {
         MMicroSec timestamp;
-        MGamepadID id;
+        MGamepadSlot id;
 
         bool left;
 
@@ -190,7 +190,7 @@ namespace MW {
 
     struct MGamepadStickEvent {
         MMicroSec timestamp;
-        MGamepadID id;
+        MGamepadSlot id;
         
         bool left;
 
@@ -236,7 +236,7 @@ namespace MW {
             MMouseLeaveEvent,
             // Touch
             MTouchBeginEvent,
-            MTouchMoveEvent,        // coalescable !
+            MTouchMoveEvent,        // coalescable
             MTouchEndEvent,
             MTouchCancelEvent,
             // Gamepad
@@ -248,10 +248,10 @@ namespace MW {
             MGamepadStickEvent,
             // Stylus
             MStylusEnterEvent,
-            MStylusHoverEvent,      // coalescable !
+            MStylusHoverEvent,      // coalescable
             MStylusLeaveEvent,
             MStylusDownEvent,
-            MStylusMoveEvent,       // coalescable !
+            MStylusMoveEvent,       // coalescable
             MStylusUpEvent,
             MStylusCancelEvent,
             // Monitors
@@ -259,15 +259,11 @@ namespace MW {
             MDisplayConnectedEvent,
             MDisplayDisconnectedEvent
             // Drop - cut from 1. version
-            // MDropEnterEvent,
-            // MDropMoveEvent,
-            // MDropLeaveEvent,
-            // MDropEvent,
     >;
 
     inline bool shouldBeDeliveredToFocused(const MEvent& ev)
     {
-        return std::visit(OVL {
+        return std::visit(MOverloaded {
             [](const MKeyPressEvent& ev) { return true; },
             [](const MKeyReleaseEvent& ev) { return true; },
 
@@ -295,8 +291,9 @@ namespace MW {
     using MEventHandlerID = uint64_t;
 
 
+    #ifdef MWINDOW_BUILD_PRINTS
     inline std::ostream& operator<<(std::ostream& os, const MEvent& ev) {
-        std::visit(OVL{
+        std::visit(MOverloaded{
             [&os](std::monostate) { os << "[Empty Event]"; },
 
             // Visibility
@@ -356,6 +353,7 @@ namespace MW {
         
         return os;
     }
+    #endif
 }
 
 #endif

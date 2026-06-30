@@ -1,17 +1,11 @@
 #ifndef M_WINDOW_H
 #define M_WINDOW_H
 
-// MWindow should
-//  * be associated with 1 window
-//  * shouldn't contain anything platform dependent
-//  * should use PIMPL
-//  * expose some of MGlobal's functionality
-
 #include "MWindow/MEvents.h"
 #include "MWindow/MMonitor.h"
 #include "MWindow/MWindowInit.h"
 #include "MWindow/MDef.h"
-#include "MWindow/MRendering.h"
+#include "MWindow/MNativeWindow.h"
 
 #include <cstdint>
 #include <vector>
@@ -35,7 +29,8 @@ namespace MW {
     std::optional<MMonitor> getPrimaryMonitor();
     bool                    isMonitorConnected(MMonitorID id);
 
-    bool isGamepadConnected(MGamepadID id);
+    bool isGamepadSlotActive(MGamepadSlot id);
+    std::vector<MGamepadSlot> getActiveGamepadSlots();
 
     MPoint getCursorPos();
     MMods getMods();
@@ -91,7 +86,7 @@ namespace MW {
         // Physical pixels - cast to an integer type
         virtual MSize getPhysicalSize() const = 0;
 
-        virtual MRenderSurface getRenderSurface() const = 0;
+        virtual MNativeWindow getNativeWindow() const = 0;
 
         [[nodiscard]] static std::unique_ptr<MWindow> create(const MWindowDesc& desc);
 

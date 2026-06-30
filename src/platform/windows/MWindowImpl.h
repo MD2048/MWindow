@@ -12,69 +12,77 @@
     #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+
+#include <atomic>
+#include <mutex>
+
 #include "MWindow/MWindow.h"
- 
+
 namespace MW {
     class MGlobal;
-    class MWindowImpl : public MWindow
-    {
+
+    class MWindowImpl : public MWindow {
     public:
         struct MWindowState {
-            bool focused             = false;
+            bool focused = false;
             DWORD windowStyle = 0;      // saved before entering fullscreen
-            RECT  currentRect        {};       // this avoids comparing floats
-            RECT  preFullscreenRect  {};       // not adjusted physical
-                                               // exstyle is 0 except in fullscreen: WS_EX_APPWINDOW
-            MWindowDesc desc         {};
+            RECT currentRect{};         // avoids comparing floats
+            RECT preFullscreenRect{};   // not adjusted for physical DPI
+                                        // exstyle is always WS_EX_APPWINDOW
+            MWindowDesc desc{};
         };
+
     private:
-        MGlobal* global;
-        
-        MWindowID id;
+        // Backend and identity
+        MGlobal* global = nullptr;
+        HWND hwnd = nullptr;
+        MWindowID id = 0;
+
+        // State synchronization
         std::atomic<bool> alive;
-        HWND hwnd;
-
-        mutable std::mutex back_state_lock;
-        MWindowState* back_state;
-        MWindowState* front_state;
-        MWindowState state1;
-        MWindowState state2;
-    public:
         std::atomic<bool> state_change;
+        mutable std::mutex back_state_lock;
 
+        // Double-buffered window state
+        MWindowState* back_state = nullptr;
+        MWindowState* front_state = nullptr;
+        MWindowState state1{};
+        MWindowState state2{};
+
+    public:
         MWindowImpl(const MWindowDesc& desc);
-
         ~MWindowImpl() override;
 
         MWindowID getId() const override;
 
         inline MWindowState const* getFrontStatePtr() const;
         inline MWindowState* getBackStatePtr() const;
+        void setStateChange();
         void handleStateRequests();
         void syncState();
         void onMonitorChange();
 
-        // ── Lifecycle ─────────────────────────────────────────────────────────
-        void show()  override;
-        void hide()  override;
+        // Lifecycle
+        void show() override;
+        void hide() override;
         void close() override;
 
-        [[nodiscard]] virtual bool isAlive() const override;
+        [[nodiscard]] bool isAlive() const override;
         [[nodiscard]] bool isVisible() const override;  // false when minimized
 
-        // ── Properties (all logical) ──────────────────────────────────────────
-        void               setTitle(const std::string& title) override;
+        // Properties (all logical)
+        void setTitle(const std::string& title) override;
         const std::string& getTitle() const override;
 
-        void     resize(MSize sz) override; // logical
-        MSize getSize()  const override;              // logical
+        void resize(MSize sz) override;
+        MSize getSize() const override; 
 
-        void  setTopLeftCorner(MPoint p) override;    // logical, virtual desktop
+        void setTopLeftCorner(MPoint p) override;
         MPoint getTopLeftCorner() const override;
 
         MRect getRect() const override;
 
-        void        setWindowMode(MWindowMode mode) override;
+        void setWindowMode(MWindowMode mode) override;
         MWindowMode getWindowMode() const override;
 
         // Which monitor this window currently lives on (dominant monitor)
@@ -83,11 +91,10 @@ namespace MW {
         // DPI scale of the current monitor
         float getDpiScale() const override;
 
-        // ── Rendering ─────────────────────────────────────────────────────────
-        // Physical pixels — pass directly to Vulkan/Metal/DX/GL
+        // Rendering
         MSize getPhysicalSize() const override;
 
-        MRenderSurface getRenderSurface() const override;
+        MNativeWindow getNativeWindow() const override;
     };
 }
 

@@ -24,6 +24,32 @@
 #define MI_WP_SIGNATURE_MASK 0xFFFFFF00
 #define MI_WP_EVENTMASK      0x000000FF
 
+namespace {
+    struct GameInputButtonMap {
+        GameInputGamepadButtons flag;
+        MW::MGamepadButton button;
+    };
+
+    struct XInputButtonMap {
+        USHORT flag;
+        MW::MGamepadButton button;
+    };
+
+    void initializeDeviceStateBuffer(std::vector<MW::MDeviceState>& states) {
+        states.assign(MW::WINDOWS_DEVICE_COUNT, {});
+        states[static_cast<size_t>(MW::MDeviceType::Keyboard)] = {MW::MKeyboardState{}};
+        states[static_cast<size_t>(MW::MDeviceType::Mouse)] = {MW::MMouseState{}};
+        states[static_cast<size_t>(MW::MDeviceType::Touchscreen)] = {MW::MTouchState{}};
+        states[static_cast<size_t>(MW::MDeviceType::Stylus)] = {MW::MStylusState{}};
+        for (size_t i = static_cast<size_t>(MW::MDeviceType::Gamepad); i < MW::WINDOWS_DEVICE_COUNT; ++i) {
+            states[i] = {MW::MGamepadState{}};
+        }
+        for (size_t i = 0; i < MW::WINDOWS_DEVICE_COUNT; ++i) {
+            initializeDeviceState(states[i]);
+        }
+    }
+}
+
 static constexpr float TRIGGER_THRESHOLD {XINPUT_GAMEPAD_TRIGGER_THRESHOLD / 255.f};
 static constexpr float LEFT_STICK_THRESHOLD_POS {XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE / 32767.f};
 static constexpr float LEFT_STICK_THRESHOLD_NEG {-(XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE / 32768.f)};
@@ -95,7 +121,6 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                 return 0;
 
             if (IS_HIGH_SURROGATE(utf16)) {
-                // First half of a surrogate pair — buffer and wait for low surrogate
                 global->pendingSurrogate = utf16;
                 return 0;
             }
@@ -103,12 +128,11 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             std::wstring utf16str;
             if (IS_LOW_SURROGATE(utf16)) {
                 if (global->pendingSurrogate != 0) {
-                    // Complete the pair
                     utf16str += global->pendingSurrogate;
                     utf16str += utf16;
                     global->pendingSurrogate = 0;
                 } else {
-                    // Orphaned low surrogate — malformed, discard
+                    // Orphaned low surrogate: discard
                     return 0;
                 }
             } else {
@@ -148,7 +172,7 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                     if(state->desc.visible)
                     {
                         state->desc.visible = false;
-                        mw->state_change.store(true,std::memory_order_release);
+                        mw->setStateChange();
                         global->push(MVisibilityChangeEvent{false}, hwnd);
                     }
                     break;
@@ -158,7 +182,7 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                     if(!state->desc.visible)
                     {
                         state->desc.visible=true;
-                        mw->state_change.store(true,std::memory_order_release);
+                        mw->setStateChange();
                         global->push(MVisibilityChangeEvent{true}, hwnd);
             
                     }
@@ -179,11 +203,11 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                 {
                     global->push(MMonitorChangeEvent{state->desc.monitor,new_mon.id}, hwnd);
                     state->desc.monitor = new_mon.id;
-                    mw->state_change.store(true,std::memory_order_release);
+                    mw->setStateChange();
                 }
                 state->desc.rect.width = (float)w / new_mon.dpiScale;
                 state->desc.rect.height = (float)h / new_mon.dpiScale;
-                mw->state_change.store(true,std::memory_order_release);
+                mw->setStateChange();
                 global->push(MResizeEvent{state->desc.rect.size()}, hwnd);
 
             }
@@ -209,11 +233,11 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                 {
                     global->push(MMonitorChangeEvent{state->desc.monitor,new_mon.id}, hwnd);
                     state->desc.monitor = new_mon.id;
-                    mw->state_change.store(true,std::memory_order_release);
+                    mw->setStateChange();
                 }
                 state->desc.rect.x = (float)x / new_mon.dpiScale;
                 state->desc.rect.y = (float)y / new_mon.dpiScale;
-                mw->state_change.store(true,std::memory_order_release);
+                mw->setStateChange();
                 global->push(MMoveEvent{state->desc.rect.topLeft()}, hwnd);
             }
 
@@ -243,7 +267,7 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             if(state->focused != true)
             {
                 state->focused = true;
-                mw->state_change.store(true,std::memory_order_release);
+                mw->setStateChange();
                 global->push(MFocusChangeEvent{true}, hwnd);   
             }
 
@@ -254,7 +278,7 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             if(state->focused != false)
             {
                 state->focused = false;
-                mw->state_change.store(true,std::memory_order_release);
+                mw->setStateChange();
                 global->push(MFocusChangeEvent{false}, hwnd);   
             }
 
@@ -267,15 +291,14 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             if(state->desc.visible != vis)
             {
                 state->desc.visible = vis;
-                mw->state_change.store(true,std::memory_order_release);
+                mw->setStateChange();
                 global->push(MVisibilityChangeEvent{vis}, hwnd);
             }
 
             return 1;
         }
         case WM_NCHITTEST:
-            // Needed if you implement custom chrome / drag regions
-            // → return HTCLIENT or custom regions
+            // DND
             break;
         case WM_ERASEBKGND:
             // Return 1 to prevent GDI clearing the window each frame
@@ -297,7 +320,6 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 
                 global->push(MStylusEnterEvent{ts,pos}, hwnd);
             }
-            // PT_TOUCH doesn't have a meaningful enter — WM_POINTERDOWN is the start
             return 0;
         }
         case WM_POINTERLEAVE: {
@@ -456,7 +478,6 @@ LRESULT CALLBACK NotificationWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                 reinterpret_cast<HRAWINPUT>(lParam),
                 RID_INPUT, nullptr, &size, sizeof(RAWINPUTHEADER));
 
-            // Stack allocate for small inputs, heap for large HID reports
             std::vector<BYTE> buf(size);
             if (GetRawInputData(
                     reinterpret_cast<HRAWINPUT>(lParam),
@@ -498,7 +519,6 @@ LRESULT CALLBACK NotificationWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                     break;
                 }
 
-                // ── Mouse ─────────────────────────────────────────────────────
                 case RIM_TYPEMOUSE: {
                     const auto& ms = raw->data.mouse;
 
@@ -539,7 +559,7 @@ LRESULT CALLBACK NotificationWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                         global->push(MMouseMoveEvent{ts, dx, dy}, nullptr);
                     }
 
-                    // usButtonFlags is a bitmask — multiple buttons can change in one message
+                    // multiple buttons can change in one message
                     struct ButtonMapping {
                         USHORT      downFlag;
                         USHORT      upFlag;
@@ -581,7 +601,7 @@ LRESULT CALLBACK NotificationWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                     break;
                 }
                 case RIM_TYPEHID: {
-                    // WM_POINTER is the right API to handle this
+                    // handled in WM_POINTER
                     break;
             }
         }
@@ -593,7 +613,6 @@ LRESULT CALLBACK NotificationWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
             std::vector<MMonitor> newM;
             global->enumerateMonitors(newM);
 
-            std::unique_lock lock(global->monitor_lock);
             std::vector<MMonitor>& oldM {global->monitors};
 
             for (auto& curr : newM) {
@@ -734,26 +753,18 @@ namespace MW {
     , gamepadMightHaveConnected{false}
     , pendingSurrogate{}
     {
-        // initialize merged MGlobalBase members
         settings = config;
         mask = settings.eventQueueCapacity - 1;
         buffer = std::make_unique<MEventSlot[]>(settings.eventQueueCapacity);
 
-        statebuf1.reserve(WINDOWS_DEVICE_COUNT);
         statebuf2 = std::vector<MDeviceState>(WINDOWS_DEVICE_COUNT);
-        statebuf2[(size_t)MDeviceType::Keyboard] = {MKeyboardState{}};
-        statebuf2[(size_t)MDeviceType::Mouse]    = {MMouseState{}};
-        statebuf2[(size_t)MDeviceType::Touchscreen] = {MTouchState{}};
-        statebuf2[(size_t)MDeviceType::Stylus]   = {MStylusState{}};
-        for(size_t i{(size_t)MDeviceType::Gamepad};i < WINDOWS_DEVICE_COUNT;++i)
-            statebuf2[i] = {MGamepadState{}};
-        for(size_t i{0};i < WINDOWS_DEVICE_COUNT;++i)
-            initializeDeviceState(statebuf2[i]);
+        initializeDeviceStateBuffer(statebuf2);
+        statebuf1 = statebuf2;
 
         devChangeBuffer = std::make_unique<MGameInputEntry[]>(DEVICE_CHANGE_BUFFER_CAPACITY);
         d_head.store(0,std::memory_order_release);
         d_tail.store(0,std::memory_order_release);
-        d_mask = DEVICE_CHANGE_BUFFER_CAPACITY-1;
+        d_mask = DEVICE_CHANGE_BUFFER_CAPACITY - 1;
 
         front_buf.store(&statebuf1, std::memory_order_release);
         back_buf.store(&statebuf2, std::memory_order_release);
@@ -761,10 +772,8 @@ namespace MW {
         setup_finished.store(false, std::memory_order_release);
 
         global_handlers.reserve(WINDOWS_GLOBAL_HANDLER_COUNT);
-
         monitorEntrys.reserve(WINDOWS_MONITOR_COUNT);
         monitors.reserve(WINDOWS_MONITOR_COUNT);
-        
         windows.reserve(WINDOWS_WINDOW_COUNT);
     }
 
@@ -787,7 +796,6 @@ namespace MW {
         delete ptr;
     }
 
-    // Drains the event queue, walks each event through registered handler chains
     void MGlobal::poll() {
 
         for(auto& entry : windows)
@@ -808,8 +816,8 @@ namespace MW {
 
         MSG msg;
         while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
-            TranslateMessage(&msg); // generates WM_CHAR from WM_KEYDOWN
-            DispatchMessage(&msg);  // routes to WndProc
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
         }
         if(!settings.ignoreGamepads)
         {
@@ -823,14 +831,11 @@ namespace MW {
         consumeAll();
     }
 
-    // Monitor query
-    std::vector<MMonitor>        MGlobal::getConnectedMonitors() {
-        std::shared_lock lock(monitor_lock);
+    std::vector<MMonitor> MGlobal::getConnectedMonitors() {
         return monitors;
     }
 
     std::optional<MMonitor> MGlobal::getMonitor(MMonitorID id) {
-        std::shared_lock lock(monitor_lock);
         auto it   = std::find_if(monitors.begin(), monitors.end(), [id](const MMonitor& m){
                                                                 return id == m.id;
                                                             });
@@ -840,7 +845,6 @@ namespace MW {
     }
 
     bool MGlobal::isMonitorConnected(MMonitorID id) {
-        std::shared_lock lock(monitor_lock);
         auto it = std::find_if(monitors.begin(),monitors.end(), [id](const MMonitor& m) {
                                                                                 return id == m.id;
                                                                           });
@@ -848,7 +852,6 @@ namespace MW {
     }
 
     const MMonitor&              MGlobal::getPrimaryMonitor() {
-        std::shared_lock lock(monitor_lock);
         return *std::find_if(monitors.begin(), monitors.end(),[](const MMonitor& mm){
                                 return mm.isPrimary;
                                 });
@@ -857,9 +860,32 @@ namespace MW {
     std::vector<MDeviceState>* MGlobal::getFrontStatePtr() const { return front_buf.load(std::memory_order_acquire); }
     std::vector<MDeviceState>* MGlobal::getBackStatePtr()  const { return back_buf.load(std::memory_order_acquire); }
 
-    bool MGlobal::isGamepadConnected(MGamepadID id) const { return gamepadsXI[id].connected; }
+    bool MGlobal::isGamepadSlotActive(MGamepadSlot id) const {
+        if(settings.ignoreGamepads) return false;
+        if(usingXInput)
+            return gamepadsXI[id].connected;
+        else
+            return gamepadsGI[id].connected;
+    }
 
-    std::optional<MGamepadID> MGlobal::toGamepadID(const APP_LOCAL_DEVICE_ID& appId) {
+    std::vector<MGamepadSlot> MGlobal::getActiveGamepadSlots() const {
+        std::vector<MGamepadSlot> v;
+        if(usingXInput) {
+            for(size_t i{0};i < gamepadsXI.size();++i) {
+                if(gamepadsXI[i].connected)
+                    v.push_back(i);
+            }
+        }
+        else {
+            for(size_t i{0};i < gamepadsGI.size();++i) {
+                if(gamepadsGI[i].connected)
+                    v.push_back(i);
+            }
+        }
+        return v;
+    }
+
+    std::optional<MGamepadSlot> MGlobal::toGamepadID(const APP_LOCAL_DEVICE_ID& appId) {
         for(size_t i{0};i < gamepadsGI.size();++i) {
             if(!std::memcmp(gamepadsGI[i].appId.value,appId.value,APP_LOCAL_DEVICE_ID_SIZE))
                 return i;
@@ -924,7 +950,6 @@ namespace MW {
     }
 
     std::optional<MMonitorID> MGlobal::monIDFromHandle(void* hMon) {
-        std::shared_lock lock(monitor_lock);
 
         for(auto&[id,ha,s] : monitorEntrys)
         {
@@ -935,7 +960,6 @@ namespace MW {
     }
     std::optional<void*> MGlobal::handleFromID(MWindowID id)
     {
-        std::shared_lock lock(monitor_lock);
 
         for(auto&[i,ha,s] : monitorEntrys)
         {
@@ -946,7 +970,6 @@ namespace MW {
     }
 
     std::optional<MMonitor>  MGlobal::monitorFromHandle(void* hMon) {
-        std::shared_lock lock(monitor_lock);
 
         MMonitorID mon_id{0};
         for(auto&[id,ha,s] : monitorEntrys)
@@ -966,7 +989,6 @@ namespace MW {
     }
 
     MMonitor MGlobal::monitorFromPoint(MPoint pt) {
-        std::shared_lock lock(monitor_lock);
 
         assert(monitors.size() != 0 && "MWindow: Monitor list is empty, monitorFromPoint() has been called!");
         MMonitor& ans = monitors[0];
@@ -991,7 +1013,6 @@ namespace MW {
     }
 
     float MGlobal::dpiFromHandle(void* hMon) {
-        std::shared_lock lock(monitor_lock);
 
         for(auto&[id,ha,s] : monitorEntrys)
         {
@@ -1098,6 +1119,7 @@ namespace MW {
             [b = settings.scrollCoalescing](const MMouseScrollEvent& ev)    { return b; },
             [b = settings.touchMoveCoalescing](const MTouchMoveEvent& ev)   { return b; },
             [b = settings.stylusMoveCoalescing](const MStylusMoveEvent& ev) { return b; },
+            [b = settings.stylusMoveCoalescing](const MStylusHoverEvent& ev){ return b; },
 
             [](const MResizeEvent& ev) { return true; },
             [](const MMoveEvent& ev) { return true; },
@@ -1121,6 +1143,7 @@ namespace MW {
             [](const MMouseScrollEvent& ev1, const MMouseScrollEvent& ev2) { return true; },
             [](const MTouchMoveEvent& ev1, const MTouchMoveEvent& ev2) { return ev1.id == ev2.id; },
             [](const MStylusMoveEvent& ev1, const MStylusMoveEvent& ev2) { return true; },
+            [](const MStylusHoverEvent& ev1, const MStylusHoverEvent& ev2) { return true; },
 
             [](const MResizeEvent& ev1, const MResizeEvent& ev2) { return true; },
             [](const MMoveEvent& ev1, const MMoveEvent& ev2) { return true; },
@@ -1167,6 +1190,11 @@ namespace MW {
                 e.new_pos = std::get<MStylusMoveEvent>(ev).new_pos;
                 e.dx += std::get<MStylusMoveEvent>(ev).dx;
                 e.dy += std::get<MStylusMoveEvent>(ev).dy;
+            },
+            [ev](MStylusHoverEvent& e) { e.timestamp = std::get<MStylusHoverEvent>(ev).timestamp;
+                e.new_pos = std::get<MStylusHoverEvent>(ev).new_pos;
+                e.dx += std::get<MStylusHoverEvent>(ev).dx;
+                e.dy += std::get<MStylusHoverEvent>(ev).dy;
             },
 
             [ev](MResizeEvent& e) { e.new_size = std::get<MResizeEvent>(ev).new_size; },
@@ -1264,11 +1292,10 @@ namespace MW {
         notificationHWND = CreateWindowExW(
             0, L"MWindowNotification", nullptr, 0,
             0, 0, 0, 0,
-            WS_OVERLAPPED,  // message-only, never shown
+            WS_OVERLAPPED,
             nullptr, nullptr, GetModuleHandle(nullptr)
         );
 
-        // Store Global* so notificationWndProc can reach it
         SetWindowLongPtrW(reinterpret_cast<HWND>(notificationHWND), GWLP_USERDATA,
                         reinterpret_cast<LONG_PTR>(this));
     }
@@ -1292,7 +1319,9 @@ namespace MW {
 
         if (!ok)
         {
+            #ifdef MWINDOW_BUILD_PRINTS
             std::cout << GetLastError() << '\n';
+            #endif
             assert(ok);
         }
     }
@@ -1327,7 +1356,7 @@ namespace MW {
     void MGlobal::decideGamepadBackend() {
         HRESULT hr = GameInputCreate(&gameInput);
         if (SUCCEEDED(hr)) {
-            gamepadsGI.reserve(DEFAULT_GAMEPAD_COUNT);
+            gamepadsGI = std::vector<MGameInputEntry>(DEFAULT_GAMEPAD_COUNT);
             usingXInput = false;
             registerDeviceCallback();
         }
@@ -1377,7 +1406,7 @@ namespace MW {
             else {
                 auto opt = toGamepadID(c.appId);
                 if(!opt) continue;
-                MGamepadID id = opt.value();
+                MGamepadSlot id = opt.value();
 
                 push(MGamepadDisconnectedEvent{id}, nullptr);
                 gamepadsGI[id] = {{},nullptr,false};
@@ -1394,11 +1423,6 @@ namespace MW {
                 GameInputGamepadState gamepadState;
                 if (reading->GetGamepadState(&gamepadState)) {
                     
-                    struct GameInputButtonMap {
-                        GameInputGamepadButtons gButton;
-                        MGamepadButton mButton;
-                    };
-
                     static constexpr GameInputButtonMap bMap[] = {
                         { GameInputGamepadDPadUp,              MGamepadButton::DpadUp },
                         { GameInputGamepadDPadDown,            MGamepadButton::DpadDown },
@@ -1524,11 +1548,6 @@ namespace MW {
 
             MMicroSec ts = getTimeNow();
 
-            struct XInputButtonMap {
-                USHORT flag;
-                MGamepadButton button;
-            };
-
             static constexpr XInputButtonMap xMap[] = {
                 { XINPUT_GAMEPAD_DPAD_UP,        MGamepadButton::DpadUp },
                 { XINPUT_GAMEPAD_DPAD_DOWN,      MGamepadButton::DpadDown },
@@ -1639,7 +1658,7 @@ namespace MW {
                 rect.width  = static_cast<float>(r.right  - r.left) / scale;
                 rect.height = static_cast<float>(r.bottom - r.top)  / scale;
 
-                // Available modes — deduplicate on all four fields now
+                // deduplicate on all four fields
                 std::vector<MVideoMode> availableModes;
                 DEVMODEW mode{};
                 mode.dmSize = sizeof(mode);
@@ -1665,7 +1684,6 @@ namespace MW {
                         availableModes.push_back(vm);
                 }
 
-                // Current mode
                 DEVMODEW dm{};
                 dm.dmSize = sizeof(dm);
                 EnumDisplaySettingsW(info.szDevice, ENUM_CURRENT_SETTINGS, &dm);

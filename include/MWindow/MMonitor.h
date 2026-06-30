@@ -67,6 +67,7 @@ namespace MW
 
     };
 
+    #ifdef MWINDOW_BUILD_PRINTS
     inline const char* toString(MColorGamut gamut) {
         switch (gamut) {
             case MColorGamut::SRGB:    return "sRGB";
@@ -82,7 +83,6 @@ namespace MW
         return os;
     }
 
-    // 3. MHDRInfo Formatter
     inline std::ostream& operator<<(std::ostream& os, const MHDRInfo& hdr) {
         os << "HDR Info:\n"
         << "    Supported:     " << (hdr.supported ? "Yes" : "No") << "\n"
@@ -93,7 +93,6 @@ namespace MW
         return os;
     }
 
-    // 4. MDisplayChangeFlags Formatter
     inline std::ostream& operator<<(std::ostream& os, const MDisplayChangeFlags& flags) {
         os << "Display Changes: ["
         << (flags.resolution  ? " Resolution "  : "")
@@ -104,7 +103,6 @@ namespace MW
         return os;
     }
 
-    // 5. MMonitor Formatter (The master struct)
     inline std::ostream& operator<<(std::ostream& os, const MMonitor& monitor) {
         os << "==================================================\n"
         << " MONITOR: " << monitor.name << " (ID: " << monitor.id << ")\n"
@@ -115,7 +113,6 @@ namespace MW
         << " Current Mode:    " << monitor.currentMode() << "\n"
         << "--------------------------------------------------\n";
         
-        // Inline HDR output
         os << monitor.hdr << "\n"
         << "--------------------------------------------------\n"
         << " Available Video Modes (" << monitor.availableModes.size() << "):\n";
@@ -127,6 +124,7 @@ namespace MW
         os << "==================================================";
         return os;
     }
+    #endif
 
 } // namespace MW
 

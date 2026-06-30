@@ -32,8 +32,6 @@ namespace MW {
         ptr->poll(); 
     }
 
-    //bool isRunning() {  }
-
     MEventHandlerID registerGlobalEventHandler(MEventHandler ha) {
         assert(ptr && "MWindow::registerGlobalEventHandler(): Initialize MWindow before calling this function!"); 
         return ptr->registerGlobalEventHandler(ha);
@@ -43,8 +41,6 @@ namespace MW {
         assert(ptr && "MWindow::unregisterGlobalEventHandler(): Initialize MWindow before calling this function!"); 
         ptr->unregisterGlobalEventHandler(id);
     }
-
-    // Monitor query
 
     std::vector<MMonitor> getConnectedMonitors() {
         assert(ptr && "MWindow::getConnectedMonitors(): Initialize MWindow before calling this function!"); 
@@ -64,9 +60,14 @@ namespace MW {
         return ptr->isMonitorConnected(id); }
 
     
-    bool isGamepadConnected(MGamepadID id) {
-        assert(ptr && "MWindow::isGamepadConnected(): Initialize MWindow before calling this function!"); 
-        return ptr->isGamepadConnected(id);
+    bool isGamepadSlotActive(MGamepadSlot id) {
+        assert(ptr && "MWindow::isGamepadSlotActive(): Initialize MWindow before calling this function!"); 
+        return ptr->isGamepadSlotActive(id);
+    }
+
+    std::vector<MGamepadSlot> getActiveGamepadSlots() {
+        assert(ptr && "MWindow::getActiveGamepadSlots(): Initialize MWindow before calling this function!"); 
+        return ptr->getActiveGamepadSlots();
     }
 
 

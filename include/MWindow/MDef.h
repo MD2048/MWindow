@@ -1,8 +1,9 @@
 #ifndef M_DEF_H
 #define M_DEF_H
 
-#include <iostream>
-
+#ifdef MWINDOW_BUILD_PRINTS
+    #include <iostream>
+#endif
 namespace MW
 {
     struct MPoint {
@@ -20,10 +21,11 @@ namespace MW
         constexpr bool operator==(const MPoint& other) const noexcept { return x == other.x && y == other.y; }
         constexpr bool operator!=(const MPoint& other) const noexcept { return !(*this == other); }
 
-        friend std::ostream& operator<<(std::ostream& os, const MPoint& p) {
-            return os << "(" << p.x << ", " << p.y << ")";
-        }
-
+        #ifdef MWINDOW_BUILD_PRINTS
+            friend std::ostream& operator<<(std::ostream& os, const MPoint& p) {
+                return os << "(" << p.x << ", " << p.y << ")";
+            }
+        #endif
     };
 
     struct MSize {
@@ -36,9 +38,11 @@ namespace MW
         constexpr bool operator==(const MSize& other) const noexcept { return width == other.width && height == other.height; }
         constexpr bool operator!=(const MSize& other) const noexcept { return !(*this == other); }
         
+        #ifdef MWINDOW_BUILD_PRINTS
         friend std::ostream& operator<<(std::ostream& os, const MSize& s) {
             return os << "[" << s.width << "x" << s.height << "] ";
         }
+        #endif
     };
     
     struct MRect {
@@ -63,9 +67,11 @@ namespace MW
         constexpr MSize  size() const noexcept { return { width, height }; }
         constexpr bool   contains(MPoint p) const noexcept { return (x <= p.x) && (p.x < x+width) && (y <= p.y) && (p.y < y+height); }
 
+        #ifdef MWINDOW_BUILD_PRINTS
         friend std::ostream& operator<<(std::ostream& os, const MRect& r) {
             return os << "[" << r.x << ", " << r.y << ", " << r.width << "x" << r.height << "]";
         }
+        #endif
     };
     
     struct MStick {

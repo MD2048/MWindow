@@ -1,40 +1,52 @@
 #include "MWindow/MWindow.h"
-#include <iostream>
-#include <thread>
-#include <chrono>
 
-#include <windows.h>
+#include <chrono>
+#include <iostream>
+#include <memory>
+#include <thread>
+#include <vector>
 
 using namespace MW;
 
-MEventResult ha(const MEvent& ev)
-{
-    std::cout << ev << std::endl;
-    return MEventResult::Consumed;
-}
-
-void tester(MWindow* mw,int ctr)
-{
-    std::this_thread::sleep_for(std::chrono::milliseconds(2));
-    switch(ctr)
+namespace {
+    MEventResult printEvent(const MEvent& ev)
     {
-        case 0: std::cout << getCursorPos() << "\n"; break;
-        case 1: std::cout << mw->getTopLeftCorner(); break;
-        case 2: mw->setWindowMode(MWindowMode::Windowed); break;
-        case 3: std::cout << mw->getRect(); break;
-        case 4: std::this_thread::sleep_for(std::chrono::seconds(2)); mw->setWindowMode(MWindowMode::Fullscreen); break;
-        case 5: std::cout << mw->getRect(); break;
-        case 6: mw->setWindowMode(MWindowMode::Windowed); break;
-        case 7: std::cout << mw->getRect(); break;
-        case 8: std::cout << mw->getCurrentMonitorID(); break;
-        case 9: std::cout << mw->getDpiScale(); break;
-        case 10: std::cout << mw->getPhysicalSize(); break;
+        std::cout << "Global event: " << ev << '\n';
+        return MEventResult::Consumed;
+    }
+
+    void printWindowApi(MWindow& window)
+    {
+        std::cout << "window id: " << window.getId() << '\n';
+        std::cout << "alive: " << window.isAlive() << '\n';
+        std::cout << "visible: " << window.isVisible() << '\n';
+
+        window.setTitle("MWindow smoke test");
+        std::cout << "title: " << window.getTitle() << '\n';
+
+        window.resize({320.0f, 240.0f});
+        std::cout << "size: " << window.getSize() << '\n';
+
+        window.setTopLeftCorner({40.0f, 40.0f});
+        std::cout << "top-left: " << window.getTopLeftCorner() << '\n';
+
+        std::cout << "rect: " << window.getRect() << '\n';
+
+        window.setWindowMode(MWindowMode::Windowed);
+        std::cout << "mode: " << window.getWindowMode() << '\n';
+
+        std::cout << "monitor: " << window.getCurrentMonitorID() << '\n';
+        std::cout << "dpi: " << window.getDpiScale() << '\n';
+        std::cout << "physical-size: " << window.getPhysicalSize() << '\n';
+
+        auto native = window.getNativeWindow();
+        std::cout << "native-window: " << native.index() << '\n';
     }
 }
 
 int main()
 {
-    MInitConfig config {};
+    MInitConfig config{};
     config.ignoreGamepads = false;
     config.eventQueueCapacity = 256;
     config.mouseMoveCoalescing = true;
@@ -43,82 +55,65 @@ int main()
 
     init(config);
 
-    MEventHandlerID haid = registerGlobalEventHandler(&ha);
-    //unregisterGlobalEventHandler(haid);
+    const auto globalHandler = registerGlobalEventHandler(&printEvent);
 
-    // Monitor query
-    std::vector<MMonitor> mons = getConnectedMonitors();
-
-    for(auto& mon : mons)
-    {
-        std::cout << mon << "\n";
-        std::cout << isMonitorConnected(mon.id);
+    const auto monitors = getConnectedMonitors();
+    std::cout << "monitor-count: " << monitors.size() << '\n';
+    for (const auto& monitor : monitors) {
+        std::cout << "monitor: " << monitor << '\n';
+        std::cout << "is-connected: " << isMonitorConnected(monitor.id) << '\n';
     }
 
-    std::cout << getPrimaryMonitor().value();
+    if (auto primary = getPrimaryMonitor()) {
+        std::cout << "primary-monitor: " << *primary << '\n';
+    }
 
-    //float getCursorX();
-    //float getCursorY();
+    std::cout << "cursor: " << getCursorPos() << '\n';
+    std::cout << "mods: " << getMods() << '\n';
+    std::cout << "gamepad-slot-0-active: " << isGamepadSlotActive(MGamepadSlot{0}) << '\n';
+    std::cout << "active-gamepads: " << getActiveGamepadSlots().size() << '\n';
 
-    // Key state query for between-event polling
-    //bool isKeyHeld(MKey key);
-    auto mon = getPrimaryMonitor().value();
+    const auto inputState = getInputState();
+    std::cout << "input-state-count: " << inputState.size() << '\n';
 
-    MWindowDesc d{};
-    d.title = "EVO+";
-    d.rect    = {0,0,200,300};
-    d.mode    = MWindowMode::Fullscreen;
-    d.backend = MRendererBackend::None;
-    d.resizable  = true;
-    d.decorated  = true;
-    d.visible    = true;
-    d.centered   = true;
+    MWindowDesc desc{};
+    desc.title = "MWindow smoke test";
+    desc.rect = {0.0f, 0.0f, 320.0f, 240.0f};
+    desc.mode = MWindowMode::Windowed;
+    desc.resizable = true;
+    desc.decorated = true;
+    desc.visible = true;
+    desc.centered = true;
 
-    d.monitor = getPrimaryMonitor().value().id;
-    std::unique_ptr<MWindow> mw = MWindow::create(d);
-    //std::this_thread::sleep_for(std::chrono::minutes(1));
-    mw->registerEventHandler(
-        [&mw](const MEvent& ev){
-            if(std::holds_alternative<MCloseRequestEvent>(ev))
-            {
-                mw->close();
-            }
-            /*
-            else if(std::holds_alternative<MResizeEvent>(ev))
-            {
-                HWND ha = reinterpret_cast<HWND>(mw->passHandle());
-                RECT r;
-                GetClientRect(reinterpret_cast<HWND>(ha),&r);
-                std::cout << r.left << " " << r.top << " " << r.right-r.left << " " << r.bottom-r.top << "\n";
-            }*/
-            else if(std::holds_alternative<MKeyPressEvent>(ev))
-            {
-                const MKeyPressEvent& e = std::get<MKeyPressEvent>(ev);
-                if(e.key == MKey::Q)
-                    mw->setWindowMode(MWindowMode::Fullscreen);
-                else if(e.key == MKey::W)
-                    mw->setWindowMode(MWindowMode::Windowed);
-                if(e.key == MKey::M)
-                    std::cout << getMods();
-            }
-            std::cout << ev << std::endl;
-            return MEventResult::Consumed;
-        });
-    int i{0};
-    while(true)
-    {
+    if (auto primary = getPrimaryMonitor()) {
+        desc.monitor = primary->id;
+    }
+
+    auto window = MWindow::create(desc);
+    if (!window) {
+        std::cerr << "Failed to create window" << std::endl;
+        shutdown();
+        return 1;
+    }
+
+    window->registerEventHandler([mw = window.get()](const MEvent& ev) {
+        std::cout << "Window event: " << ev << '\n';
+        if(std::holds_alternative<MCloseRequestEvent>(ev))
+            mw->close();
+        return MEventResult::Consumed;
+    });
+
+    printWindowApi(*window);
+
+    for (int i = 0; i < 20 && window->isAlive(); ++i) {
         poll();
-        if(!mw->isAlive())
-            break;
-        
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        /*
-        std::thread t(tester,mw.get(),i);
-        t.join();
-        */
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 
-    shutdown();
+    window->close();
+    poll();
 
+    unregisterGlobalEventHandler(globalHandler);
+    shutdown();
     return 0;
 }

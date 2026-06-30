@@ -6,11 +6,16 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 17)
 
 option(BUILD_TESTS "Build tests" ON)
+option(PRETTY_PRINTS "Build pretty prints for public enums" ON)
 
 
 # Add library and source
 
 add_library (MWindow) # can be made STATIC or SHARED in presets (BUILD_SHARED_LIBS var)
+
+if(PRETTY_PRINTS)
+    target_compile_definitions(MWindow PUBLIC MWINDOW_BUILD_PRINTS)
+endif()
 
 if(MSVC)
     target_compile_options(MWindow PRIVATE 
@@ -28,7 +33,7 @@ if(WIN32)
     target_compile_definitions(MWindow PUBLIC MPLATFORM_WINDOWS)
     target_sources(MWindow
         PRIVATE
-
+        src/MWindow.cpp
         src/platform/windows/MWindowImpl.cpp
         src/platform/windows/MGlobalImpl.cpp
     )

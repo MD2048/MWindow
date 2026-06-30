@@ -2,7 +2,7 @@
 #define M_WINDOWINIT_H
 
 #include "MWindow/MMonitor.h"
-#include "MWindow/MRendering.h"
+#include "MWindow/MNativeWindow.h"
 
 #include <cstdint>
 #include <string>
@@ -17,7 +17,6 @@ namespace MW
         std::string      title   = "MWindow";
         MRect            rect    = {100,100,800,600};
         MWindowMode      mode    = MWindowMode::Windowed;
-        MRendererBackend backend = MRendererBackend::None;
 
         bool resizable  = true;     // best effort
         bool decorated  = true;     // best effort
@@ -43,7 +42,19 @@ namespace MW
         MEventHandler   handler;
     };
 
-} // namespace MW
+    #ifdef MWINDOW_BUILD_PRINTS
 
+    inline std::ostream& operator<<(std::ostream& os, const MWindowMode& mode) {
+        switch(mode) {
+            case MWindowMode::Windowed: return os << "Windowed";
+            case MWindowMode::Fullscreen: return os << "Fullscreen";
+            case MWindowMode::BorderlessFullscreen: return os << "BorderlessFullscreen";
+            default: return os << "???";
+        }
+    }
+
+    #endif
+
+} // namespace MW
 
 #endif

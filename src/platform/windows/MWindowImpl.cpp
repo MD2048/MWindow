@@ -22,8 +22,8 @@ namespace MW
     {
         state_change.store(false,std::memory_order_release);
         alive.store(true,std::memory_order_release);
-        back_state = &state1;
-        front_state = &state2;
+        front_state = &state1;
+        back_state = &state2;
 
         state2.desc = desc;
         state2.focused = desc.visible;;
@@ -95,12 +95,12 @@ namespace MW
             
             if(desc.mode == MWindowMode::Windowed)
             {
-                state2.desc.rect = RECTToMRect(wa, scale);
-                state2.currentRect = wa;
                 SetWindowPos(hw,nullptr,
                     wa.left, wa.top,
                     0,0,
                     SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+                state2.desc.rect = RECTToMRect(wa, scale);
+                state2.currentRect = wa;
             }
             else {
                 state2.preFullscreenRect = wa;
@@ -111,6 +111,8 @@ namespace MW
         if(desc.mode == MWindowMode::Windowed)
         {
             RECT r{ MRectToRECT(state2.desc.rect,scale) };
+            r.right -= r.left;
+            r.bottom -= r.top;
             r.left = 0; r.top = 0;
 
             AdjustWindowRectExForDpi(
@@ -144,6 +146,8 @@ namespace MW
     MWindowImpl::MWindowState* MWindowImpl::getBackStatePtr() const {
         return back_state;
     }
+
+    void MWindowImpl::setStateChange() { state_change.store(true,std::memory_order_release); }
         
     void MWindowImpl::handleStateRequests() {
         if(!state_change.load(std::memory_order_acquire)) return;
@@ -369,12 +373,12 @@ namespace MW
         }
     }
 
-    // ── Lifecycle ─────────────────────────────────────────────────────────────────
+    // Lifecycle
 
     void MWindowImpl::show() {
-        MWindowState& state = *getBackStatePtr();
-        
         std::lock_guard<std::mutex> lock(back_state_lock);
+
+        MWindowState& state = *getBackStatePtr();
 
         if(state.desc.visible == true) return;
         state.desc.visible = true;
@@ -382,9 +386,9 @@ namespace MW
     }
 
     void MWindowImpl::hide() {
-        MWindowState& state = *getBackStatePtr();
-        
         std::lock_guard<std::mutex> lock(back_state_lock);
+
+        MWindowState& state = *getBackStatePtr();
 
         if(state.desc.visible == false) return;
         state.desc.visible = false;
@@ -405,12 +409,12 @@ namespace MW
         return getFrontStatePtr()->desc.visible;
     }
 
-    // ── Properties ────────────────────────────────────────────────────────────────
+    // Properties
 
     void MWindowImpl::setTitle(const std::string& title) {
-        MWindowState& state = *getBackStatePtr();
-
         std::lock_guard<std::mutex> lock(back_state_lock);
+
+        MWindowState& state = *getBackStatePtr();
 
         if(state.desc.title == title) return;
         state.desc.title = title;
@@ -422,9 +426,10 @@ namespace MW
     }
 
     void MWindowImpl::resize(MSize sz) {
+        std::lock_guard<std::mutex> lock(back_state_lock);
+
         MWindowState& state = *getBackStatePtr();
         float scale = global->getMonitor(state.desc.monitor).value().dpiScale;
-        std::lock_guard<std::mutex> lock(back_state_lock);
 
         if(state.desc.mode == MWindowMode::Windowed)
         {
@@ -450,9 +455,10 @@ namespace MW
     }
 
     void MWindowImpl::setTopLeftCorner(MPoint p) {
+        std::lock_guard<std::mutex> lock(back_state_lock);
+
         MWindowState& state = *getBackStatePtr();
         float scale = global->getMonitor(state.desc.monitor).value().dpiScale;
-        std::lock_guard<std::mutex> lock(back_state_lock);
 
         if(state.desc.mode == MWindowMode::Windowed)
         {
@@ -482,8 +488,10 @@ namespace MW
     }
 
     void MWindowImpl::setWindowMode(MWindowMode mode) {
-        MWindowState& state = *getBackStatePtr();
         std::lock_guard<std::mutex> lock(back_state_lock);
+
+        MWindowState& state = *getBackStatePtr();
+
         if(state.desc.mode == mode) return;
         if(state.desc.mode != MWindowMode::Windowed && mode != MWindowMode::Windowed) return;
         
@@ -502,12 +510,16 @@ namespace MW
         return global->getMonitor(getFrontStatePtr()->desc.monitor).value().dpiScale;
     }
 
-    // ── Rendering ─────────────────────────────────────────────────────────────────
+    // Rendering
 
     MSize MWindowImpl::getPhysicalSize() const {
         auto& rc = getFrontStatePtr()->currentRect;
         return {static_cast<float>(rc.right-rc.left), static_cast<float>(rc.bottom-rc.top)};
     }
 
-    MRenderSurface MWindowImpl::getRenderSurface() const { return {}; }
+    MNativeWindow MWindowImpl::getNativeWindow() const {
+        return MWindowsNativeWindow{reinterpret_cast<MOpaqueHandle>(hwnd),
+            reinterpret_cast<MOpaqueHandle>(GetModuleHandle(nullptr))};
+    }
+
 } // namespace MW

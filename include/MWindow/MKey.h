@@ -19,7 +19,7 @@ namespace MW {
 
     enum class MGamepadButton : uint32_t {
         DpadUp, DpadDown, DpadLeft, DpadRight,
-        ActionBottom, ActionRight, ActionLeft, ActionTop, // Xbox: A, B, X, Y | PS: Cross, Circle, Square, Triangle
+        ActionBottom, ActionRight, ActionLeft, ActionTop, // Xbox: A, B, X, Y  PS: Cross, Circle, Square, Triangle
         BumperLeft, BumperRight,
         ThumbLeft, ThumbRight, // Stick clicks
         Start, Select, Guide,
@@ -29,27 +29,26 @@ namespace MW {
     enum class MKey : uint32_t {
         Unknown = 0,
 
-        // ── Alphanumeric ──────────────────────────────────────────────────────
+        // Alphanumeric
         A, B, C, D, E, F, G, H, I, J, K, L, M,
         N, O, P, Q, R, S, T, U, V, W, X, Y, Z,
 
         Num0, Num1, Num2, Num3, Num4,
         Num5, Num6, Num7, Num8, Num9,
 
-        // ── Function keys ─────────────────────────────────────────────────────
+        // Function keys
         F1,  F2,  F3,  F4,  F5,  F6,
         F7,  F8,  F9,  F10, F11, F12,
-        F13, F14, F15, F16, F17, F18,  // F13–F24 appear on extended keyboards,
-        F19, F20, F21, F22, F23, F24,  // some Macs, and media keyboards
+        F13, F14, F15, F16, F17, F18,  // F13–F24 appear on extended keyboards
+        F19, F20, F21, F22, F23, F24, 
 
-        // ── Modifiers ─────────────────────────────────────────────────────────
+        // Modifier
         LeftShift,  RightShift,
         LeftCtrl,   RightCtrl,
-        LeftAlt,    RightAlt,   // RightAlt = AltGr on European keyboards —
-                                // generates RI_KEY_E0 on the same MakeCode as LeftAlt
+        LeftAlt,    RightAlt,   // RightAlt = AltGr on European keyboards 
         LeftGui,    RightGui,   // Windows key / Cmd key
 
-        // ── Control & editing ─────────────────────────────────────────────────
+        // Control & editing
         Escape,
         Tab,
         CapsLock,
@@ -63,25 +62,25 @@ namespace MW {
         PageUp,
         PageDown,
 
-        // ── Arrow keys ────────────────────────────────────────────────────────
+        // Arrow key
         Up,
         Down,
         Left,
         Right,
 
-        // ── Lock / system ─────────────────────────────────────────────────────
+        // Lock / system
         NumLock,
         ScrollLock,
         PrintScreen,
         Pause,          // Arrives with RI_KEY_E1 flag — unique among all keys
         App,            // Application/Menu key — right of RightGui, opens context menu
 
-        // ── Media keys ────────────────────────────────────────────────────────
+        // Media key
         VolumeUp,       // Dedicated key on the top-right cluster of some keyboards
         VolumeDown,
         Mute,
 
-        // ── Punctuation (position-based, US layout names) ─────────────────────
+        // Punctuation (position-based, US layout names)
         Grave,          // ` ~
         Minus,          // - _
         Equal,          // = +
@@ -94,7 +93,7 @@ namespace MW {
         Period,         // . >
         Slash,          // / ?
 
-        // ── ISO-only keys (absent on ANSI/US keyboards) ───────────────────────
+        // ISO-only keys (absent on ANSI/US keyboards)─
         NonUSBackslash, // Extra key between LeftShift and Z on ISO keyboards.
                         // Typically < > on most European layouts, \ | on some others.
                         // Same MakeCode as Backslash but carries RI_KEY_E0.
@@ -103,11 +102,11 @@ namespace MW {
                         // Typically # ~ on UK layout.
                         // The larger ISO Enter key fills the space this occupies on ANSI.
 
-        // ── Japanese layout keys (JIS keyboards only) ─────────────────────────
+        // Japanese layout keys (JIS keyboards only)
         Yen, Ro, Muhenkan,
         Henkan, KatakanaHiragana, 
 
-        // ── Numpad ────────────────────────────────────────────────────────────
+        // Numpad
         KP0, KP1, KP2, KP3, KP4,
         KP5, KP6, KP7, KP8, KP9,
         KPDecimal,      // .  (comma on Brazilian and some European layouts — see KPComma)
@@ -122,6 +121,7 @@ namespace MW {
         Count
     };
 
+    #ifdef MWINDOW_BUILD_PRINTS
     constexpr const char* ToString(MMouseButton button) {
         switch (button) {
             case MMouseButton::Unknown: return "Unknown";
@@ -156,7 +156,9 @@ namespace MW {
             default:                          return "Invalid";
         }
     }
+    #endif
 
+    #ifdef MWINDOW_BUILD_PRINTS
     constexpr const char* ToString(MKey key) {
         switch (key) {
             case MKey::Unknown: return "Unknown";
@@ -274,6 +276,7 @@ namespace MW {
             default:               return "Invalid";
         }
     }
+    #endif
 }
 
 

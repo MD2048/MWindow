@@ -13,7 +13,7 @@ namespace MW
 {
     constexpr int DEFAULT_GAMEPAD_COUNT{4};
 
-    using MGamepadID = uint64_t; // 0 to 3
+    using MGamepadSlot = uint64_t; // 0 to 3
 
     enum class MDeviceType   { Unknown = -1, Keyboard, Mouse, Touchscreen, Stylus, Gamepad };
 
@@ -90,6 +90,16 @@ namespace MW
         MStylusState
     >;
 
+    template<class... Ts>
+    struct MOverloaded : Ts...
+    {
+        using Ts::operator()...;
+    };
+    template<class... Ts>
+    MOverloaded(Ts...) -> MOverloaded<Ts...>;
+
+
+    #ifdef MWINDOW_BUILD_PRINTS
     inline const char* toString(MDeviceType type) {
         switch (type) {
             case MDeviceType::Keyboard:    return "Keyboard";
@@ -142,16 +152,8 @@ namespace MW
         return os;
     }
 
-    template<class... Ts>
-    struct OVL : Ts...
-    {
-        using Ts::operator()...;
-    };
-
-    template<class... Ts>
-    OVL(Ts...) -> OVL<Ts...>;
     inline std::ostream& operator<<(std::ostream& os, const MDeviceState& state) {
-        std::visit(OVL{
+        std::visit(MOverloaded{
             [&os](const MKeyboardState& s) { os << s; },
             [&os](const MMouseState& s)    { os << s; },
             [&os](const MTouchState& s)    { os << s; },
@@ -160,6 +162,7 @@ namespace MW
         }, state);
         return os;
     }
+    #endif
 
 } // namespace MW
 

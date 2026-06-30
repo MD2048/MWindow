@@ -10,7 +10,7 @@ namespace MW {
     static void buildScanTable() {
         auto reg = [](uint32_t code, MKey key) { sScanToMKey[code] = key; };
 
-        // ── No E0 prefix ──────────────────────────────────────────────────────
+        // No E0 prefix
         reg(0x01, MKey::Escape);
         reg(0x02, MKey::Num1);          reg(0x03, MKey::Num2);
         reg(0x04, MKey::Num3);          reg(0x05, MKey::Num4);
@@ -78,7 +78,7 @@ namespace MW {
         // ISO
         reg(0x2B, MKey::NonUSHash);     // same position, ISO keyboards only
 
-        // ── E0-prefixed (index | 0x100) ───────────────────────────────────────
+        // E0-prefixed (index | 0x100)
         reg(0x100 | 0x10, MKey::VolumeDown); // media cluster varies by keyboard,
         reg(0x100 | 0x20, MKey::VolumeUp);   // these cover common mappings
         reg(0x100 | 0x1C, MKey::KPEnter);
