@@ -50,9 +50,9 @@ namespace MW {
         };
 
         struct MEventSlot {
-            MEvent event;
-            bool global;
-            MWindowID id;
+            MEvent event = std::monostate{};
+            bool global  = false;
+            MWindowID id = std::numeric_limits<uint64_t>::max();
         };
 
         struct MMonitorEntry {
@@ -119,6 +119,7 @@ namespace MW {
         void consumeAll();
         void switchBuffers();
         void executeGlobalHandlerChain(const MEvent& ev);
+        bool canCoalesce(const MEventSlot& a, const MEventSlot& b);
         bool shouldCoalesce(const MEvent& a);
         size_t findCoalescableEventIndex(const MEventSlot& ev, void* hwnd);
         void coalesceEvent(size_t index, const MEvent& ev);

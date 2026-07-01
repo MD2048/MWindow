@@ -47,7 +47,6 @@ namespace MW
         bool refreshRate : 1;  // refresh rate changed
         bool bitDepth    : 1;  // bitsPerChannel changed
         bool hdrState    : 1;  // HDR enabled/disabled
-        bool position    : 1;  // monitor moved in virtual desktop
     };
 
     struct MMonitor {
@@ -95,11 +94,12 @@ namespace MW
 
     inline std::ostream& operator<<(std::ostream& os, const MDisplayChangeFlags& flags) {
         os << "Display Changes: ["
+        << (flags.rect        ? " Rectangle "   : "")
+        << (flags.scale       ? " DPI "         : "")
         << (flags.resolution  ? " Resolution "  : "")
         << (flags.refreshRate ? " RefreshRate " : "")
         << (flags.bitDepth    ? " BitDepth "    : "")
-        << (flags.hdrState    ? " HDRState "    : "")
-        << (flags.position    ? " Position "    : "") << "]";
+        << (flags.hdrState    ? " HDRState "    : "") << "]";
         return os;
     }
 

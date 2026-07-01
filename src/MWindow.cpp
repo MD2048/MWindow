@@ -13,11 +13,6 @@
 
 namespace MW {
 
-    void* MWindow::passHandle()
-    {
-        return MGlobal::Get()->windows.at(0).hwnd;
-    }
-
     static MGlobal* ptr{ nullptr };
 
     void init(const MInitConfig& config) { ptr = MGlobal::init(config); }
@@ -103,7 +98,7 @@ namespace MW {
     }
 
     void MWindow::executeHandlerChain(const MEvent& ev) {
-        std::shared_lock lock(handler_lock);
+        std::lock_guard<std::mutex> lock(handler_lock);
         
         for(size_t i{handlers.size()-1};i >= 0;--i)
         {
@@ -113,14 +108,14 @@ namespace MW {
     }
 
     MEventHandlerID MWindow::registerEventHandler(MEventHandler ha) {
-        std::unique_lock lock(handler_lock);
+        std::lock_guard<std::mutex> lock(handler_lock);
         handlers.push_back(MEventHandlerEntry{nextID, ha});
 
         return nextID++;
     }
     
     void MWindow::unregisterEventHandler(MEventHandlerID id) {
-        std::unique_lock lock(handler_lock);
+        std::lock_guard<std::mutex> lock(handler_lock);
 
         for(size_t i{0};i < handlers.size();++i)
         {

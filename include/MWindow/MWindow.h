@@ -40,7 +40,7 @@ namespace MW {
     
     class MWindow {
     private:
-        std::shared_mutex handler_lock;
+        std::mutex handler_lock;
         std::vector<MEventHandlerEntry> handlers;
         MEventHandlerID nextID;
     protected:
@@ -89,8 +89,6 @@ namespace MW {
         virtual MNativeWindow getNativeWindow() const = 0;
 
         [[nodiscard]] static std::unique_ptr<MWindow> create(const MWindowDesc& desc);
-
-        void* passHandle();
     };
 }
 

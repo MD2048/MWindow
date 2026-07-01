@@ -13,113 +13,76 @@ namespace MW
 {
     constexpr int DEFAULT_GAMEPAD_COUNT{4};
 
+    using MTouchID  = uint64_t;
     using MGamepadSlot = uint64_t; // 0 to 3
-
-    enum class MDeviceType   { Unknown = -1, Keyboard, Mouse, Touchscreen, Stylus, Gamepad };
+    enum class MDeviceType { Unknown = -1, Keyboard, Mouse, Touchscreen, Stylus, Gamepad };
 
     struct MMods {
         bool shift : 1;
-        bool ctrl  : 1;
-        bool alt   : 1;
-        bool gui   : 1;   // Win / Cmd
-        bool caps  : 1;   // CapsLock state, not the key itself
-        bool num   : 1;   // NumLock state
+        bool ctrl : 1;
+        bool alt : 1;
+        bool gui : 1;  // Win / Cmd
+        bool caps : 1; // CapsLock state, not the key itself
+        bool num : 1;  // NumLock state
 
         bool none() const { return !shift && !ctrl && !alt && !gui; }
-        void update(MKey k, bool press)
-        {
-            switch(k)
-            {
+        void update(MKey k, bool press) {
+            switch (k) {
                 case MKey::LeftShift:
-                case MKey::RightShift:
-                    shift = press; return;
+                case MKey::RightShift: shift = press; return;
                 case MKey::LeftCtrl:
-                case MKey::RightCtrl:
-                    ctrl = press; return;
+                case MKey::RightCtrl: ctrl = press; return;
                 case MKey::LeftAlt:
-                case MKey::RightAlt:
-                    alt = press; return;
+                case MKey::RightAlt: alt = press; return;
                 case MKey::LeftGui:
-                case MKey::RightGui:
-                    gui = press; return;
-                case MKey::CapsLock:
-                    if(press) caps = !caps; return;
-                case MKey::NumLock:
-                    if(press) num = !num; return;
+                case MKey::RightGui: gui = press; return;
+                case MKey::CapsLock: if (press) caps = !caps; return;
+                case MKey::NumLock: if (press) num = !num; return;
             }
         }
     };
 
-    struct MKeyboardState {
-        std::bitset<static_cast<size_t>(MKey::Count)> held;
-        MMods mods;
-    };
-
-    struct MMouseState {
-        MPoint p;
-        std::bitset<static_cast<size_t>(MMouseButton::Count)> buttons;
-    };
-
-    struct MTouchState {
-        std::unordered_map<uint32_t, MPoint> activePoints; // touch id → point
-    };
-
+    struct MKeyboardState { std::bitset<static_cast<size_t>(MKey::Count)> held; MMods mods; };
+    struct MMouseState { MPoint p; std::bitset<static_cast<size_t>(MMouseButton::Count)> buttons; };
+    struct MTouchState { std::unordered_map<MTouchID, MPoint> activePoints; }; // touch id → point
     struct MGamepadState {
         bool connected = false;
-
         std::bitset<static_cast<size_t>(MGamepadButton::Count)> held;
-
         MStick left;        // -1.f to 1.f
         MStick right;
-
         float leftTrigger = 0.f;  // 0.f to 1.f
         float rightTrigger = 0.f;
     };
-    
-    struct MStylusState  {
-        bool    inRange   = false;
-        bool    inContact = false;
-        MPoint  pos       = {0,0};
-    };
+    struct MStylusState { bool inRange = false; bool inContact = false; MPoint pos = {0, 0}; };
 
-    using MDeviceState = std::variant<
-        MKeyboardState,
-        MMouseState,
-        MTouchState,
-        MGamepadState,
-        MStylusState
-    >;
+    using MDeviceState = std::variant<MKeyboardState, MMouseState, MTouchState, MGamepadState, MStylusState>;
 
     template<class... Ts>
-    struct MOverloaded : Ts...
-    {
-        using Ts::operator()...;
-    };
+    struct MOverloaded : Ts... { using Ts::operator()...; };
     template<class... Ts>
     MOverloaded(Ts...) -> MOverloaded<Ts...>;
 
-
-    #ifdef MWINDOW_BUILD_PRINTS
+#ifdef MWINDOW_BUILD_PRINTS
     inline const char* toString(MDeviceType type) {
         switch (type) {
-            case MDeviceType::Keyboard:    return "Keyboard";
-            case MDeviceType::Mouse:       return "Mouse";
+            case MDeviceType::Keyboard: return "Keyboard";
+            case MDeviceType::Mouse: return "Mouse";
             case MDeviceType::Touchscreen: return "Touchscreen";
-            case MDeviceType::Gamepad:     return "Gamepad";
-            case MDeviceType::Stylus:      return "Stylus";
-            default:                       return "Unknown";
+            case MDeviceType::Gamepad: return "Gamepad";
+            case MDeviceType::Stylus: return "Stylus";
+            default: return "Unknown";
         }
     }
 
     inline std::ostream& operator<<(std::ostream& os, const MMods& mods) {
         os << "[ ";
         if (mods.shift) os << "Shift ";
-        if (mods.ctrl)  os << "Ctrl ";
-        if (mods.alt)   os << "Alt ";
+        if (mods.ctrl) os << "Ctrl ";
+        if (mods.alt) os << "Alt ";
         if (mods.gui) os << "Super ";
-        if (mods.caps)  os << "Caps ";
-        if (mods.num)   os << "Num ";
-        
+        if (mods.caps) os << "Caps ";
+        if (mods.num) os << "Num ";
+
         if (mods.none() && !mods.caps && !mods.num) os << "None ";
         os << "]";
         return os;
@@ -127,22 +90,22 @@ namespace MW
 
     inline std::ostream& operator<<(std::ostream& os, const MKeyboardState& state) {
         os << "  Keyboard State:\n"
-        << "    Keys Held:  " << state.held.count() << " active\n"
-        << "    Modifiers:  " << state.mods;
+           << "    Keys Held:  " << state.held.count() << " active\n"
+           << "    Modifiers:  " << state.mods;
         return os;
     }
 
     inline std::ostream& operator<<(std::ostream& os, const MMouseState& state) {
         os << "  Mouse State:\n"
-        << "    Position:   " << state.p << "\n"
-        << "    Btns Held:  " << state.buttons.count() << " active";
+           << "    Position:   " << state.p << "\n"
+           << "    Btns Held:  " << state.buttons.count() << " active";
         return os;
     }
 
     inline std::ostream& operator<<(std::ostream& os, const MTouchState& state) {
         os << "  Touch State:\n"
-        << "    Active Pts: " << state.activePoints.size();
-        
+           << "    Active Pts: " << state.activePoints.size();
+
         if (!state.activePoints.empty()) {
             os << "\n    Coordinates:";
             for (const auto& [id, pt] : state.activePoints) {
@@ -152,17 +115,35 @@ namespace MW
         return os;
     }
 
+    inline std::ostream& operator<<(std::ostream& os, const MGamepadState& state) {
+        os << "  Gamepad State:\n"
+           << "    Connected:  " << (state.connected ? "yes" : "no") << "\n"
+           << "    Buttons:    " << state.held.count() << " held\n"
+           << "    Left Stick: " << state.left << "\n"
+           << "    Right Stick:" << state.right << "\n"
+           << "    LT/RT:      " << state.leftTrigger << "/" << state.rightTrigger;
+        return os;
+    }
+
+    inline std::ostream& operator<<(std::ostream& os, const MStylusState& state) {
+        os << "  Stylus State:\n"
+           << "    In Range:   " << (state.inRange ? "yes" : "no") << "\n"
+           << "    In Contact: " << (state.inContact ? "yes" : "no") << "\n"
+           << "    Position:   " << state.pos;
+        return os;
+    }
+
     inline std::ostream& operator<<(std::ostream& os, const MDeviceState& state) {
         std::visit(MOverloaded{
             [&os](const MKeyboardState& s) { os << s; },
-            [&os](const MMouseState& s)    { os << s; },
-            [&os](const MTouchState& s)    { os << s; },
-            [&os](const MGamepadState&)    { os << "  Gamepad State:\n    [Reserved / No Data]"; },
-            [&os](const MStylusState&)     { os << "  Stylus State:\n    [Reserved / No Data]"; }
+            [&os](const MMouseState& s) { os << s; },
+            [&os](const MTouchState& s) { os << s; },
+            [&os](const MGamepadState& s) { os << s; },
+            [&os](const MStylusState& s) { os << s; }
         }, state);
         return os;
     }
-    #endif
+#endif
 
 } // namespace MW
 

@@ -106,14 +106,14 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                 global->mouseTracking = true;
                 global->push(MMouseEnterEvent{}, hwnd);
             }
-            break;
+            return 0;
         }
 
-        case WM_MOUSELEAVE: {
-            global->mouseTracking = false;
-            global->push(MMouseLeaveEvent{}, hwnd);
-            break;
-        }
+    case WM_MOUSELEAVE: {
+        global->mouseTracking = false;
+        global->push(MMouseLeaveEvent{}, hwnd);
+        return 0;
+    }
         case WM_CHAR: {
             wchar_t utf16 = static_cast<wchar_t>(wParam);
 
@@ -249,9 +249,6 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         case WM_DPICHANGED:
         {
             float dpiScale = (float)LOWORD(wParam) / 96.0f;
-            
-            /*RECT r = MRectToRECT(state->desc.rect,dpiScale);
-            const RECT* suggested = &r;*/
             const RECT* suggested = reinterpret_cast<const RECT*>(lParam);
 
             SetWindowPos(hwnd, nullptr, 
@@ -494,7 +491,11 @@ LRESULT CALLBACK NotificationWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                 case RIM_TYPEKEYBOARD: {
                     const auto& kb = raw->data.keyboard;
 
-                    MKey key = translateMakeCode(kb.MakeCode,kb.Flags & RI_KEY_E0);
+                    MKey key;
+                    if (kb.Flags & RI_KEY_E1) 
+                        key = MKey::Pause;
+                    else
+                        key = translateMakeCode(kb.MakeCode,kb.Flags & RI_KEY_E0);
                     if(key == MKey::Unknown) return 1; // NOTE: Unknown keys are ignored!!
 
                     auto* state = global->getBackStatePtr();
@@ -632,10 +633,9 @@ LRESULT CALLBACK NotificationWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
                 flags.refreshRate = (curr.currentMode().refreshRate  != prev.currentMode().refreshRate);
                 flags.bitDepth    = (curr.currentMode().bitsPerChannel != prev.currentMode().bitsPerChannel);
                 flags.hdrState    = (curr.hdr.active               != prev.hdr.active);
-                flags.position    = (curr.rect.x != prev.rect.x    || curr.rect.y != prev.rect.y);
 
                 // Only push if something actually changed
-                if (flags.resolution || flags.refreshRate || flags.bitDepth || flags.hdrState || flags.position || flags.scale || flags.rect)
+                if (flags.resolution || flags.refreshRate || flags.bitDepth || flags.hdrState || flags.scale || flags.rect)
                 {
                     if(flags.resolution || flags.refreshRate || flags.bitDepth)
                     {
@@ -1133,7 +1133,7 @@ namespace MW {
             [](const auto&) { return false; }
         }, a);
     }
-    bool canCoalesce(const MGlobal::MEventSlot& a, const MGlobal::MEventSlot& b) {
+    bool MGlobal::canCoalesce(const MEventSlot& a, const MEventSlot& b) {
         if(a.global != b.global)
             return false;
         if(a.id != b.id)
@@ -1306,13 +1306,13 @@ namespace MW {
         // Keyboard
         rids[0].usUsagePage = 0x01; // HID Generic Desktop
         rids[0].usUsage     = 0x06; // Keyboard
-        rids[0].dwFlags     = RIDEV_INPUTSINK | RIDEV_DEVNOTIFY;
+        rids[0].dwFlags     = RIDEV_INPUTSINK;
         rids[0].hwndTarget  = reinterpret_cast<HWND>(notificationHWND);
 
         // Mouse
         rids[1].usUsagePage = 0x01;
         rids[1].usUsage     = 0x02; // Mouse
-        rids[1].dwFlags     = RIDEV_INPUTSINK | RIDEV_DEVNOTIFY;
+        rids[1].dwFlags     = RIDEV_INPUTSINK;
         rids[1].hwndTarget  = reinterpret_cast<HWND>(notificationHWND);
 
         BOOL ok = RegisterRawInputDevices(rids, 2, sizeof(RAWINPUTDEVICE));

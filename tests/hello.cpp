@@ -111,7 +111,6 @@ int main()
     }
 
     window->close();
-    poll();
 
     unregisterGlobalEventHandler(globalHandler);
     shutdown();

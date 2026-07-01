@@ -132,7 +132,13 @@ namespace MW
     }
 
     MWindowImpl::~MWindowImpl() {
-        close();
+        alive.store(false,std::memory_order_release);
+        if(hwnd)
+        {
+            global->unregisterWindow(id);
+            DestroyWindow(hwnd);
+        }
+        hwnd = nullptr;
     }
 
     MWindowID MWindowImpl::getId() const {
@@ -173,7 +179,10 @@ namespace MW
         if(!alive.load(std::memory_order_acquire))
         {
             if(hwnd)
+            {
+                global->unregisterWindow(id);
                 DestroyWindow(hwnd);
+            }
             hwnd = nullptr;
             return;
         }
@@ -396,9 +405,7 @@ namespace MW
     }
 
     void MWindowImpl::close() {
-        if (!alive.exchange(false,std::memory_order_acq_rel)) return;
-
-        global->unregisterWindow(id);
+        alive.store(false,std::memory_order_release);
     }
 
     bool MWindowImpl::isAlive() const {

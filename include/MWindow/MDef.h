@@ -83,6 +83,12 @@ namespace MW
 
         constexpr bool operator==(const MStick& other) const noexcept { return x == other.x && y == other.y; }
         constexpr bool operator!=(const MStick& other) const noexcept { return !(*this == other); }
+
+        #ifdef MWINDOW_BUILD_PRINTS
+        friend std::ostream& operator<<(std::ostream& os, const MStick& s) {
+            return os << "(" << s.x << ", " << s.y << ")";
+        }
+        #endif
     };
 }
 
