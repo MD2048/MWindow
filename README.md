@@ -9,17 +9,17 @@ MWindow is a thin, cross-platform C++17 window abstraction library for multi-thr
 - Propagating event handler chains with explicit consume/continue control
 - Logical coordinate system — DPI handling done internally
 - Thread-safe state reads, command-queued state writes
-- Gamepad support (GameInput preferred, XInput fallback on Windows)
-- Touch and stylus input
+- Gamepad support
+- Touch and stylus support
 - Monitor enumeration with HDR and DPI info
-- Timestamps on input events (microseconds since `MW::init()`)
+- Timestamps on input events in microseconds
 - Configurable ring buffer with per-type coalescing
 
 ## Supported Platforms
 
 | Platform | Backend | Status |
 |---|---|---|
-| Windows | Win32, PerMonitorV2 | Implemented |
+| Windows | Win32 | Implemented |
 | macOS | Cocoa | Planned |
 | Linux | Wayland + X11 fallback | Planned |
 | iOS | UIKit | Planned |
