@@ -1239,7 +1239,7 @@ namespace MW {
 
         if(!global_handlers.size()) return;
 
-        for(size_t i{global_handlers.size()-1};i >= 0;--i)
+        for(int i{static_cast<int>(global_handlers.size()-1)};i >= 0;--i)
         {
             if(global_handlers[i].handler(ev) == MEventResult::Consumed)
                 break;
