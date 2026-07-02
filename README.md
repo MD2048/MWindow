@@ -54,8 +54,8 @@ int main() {
 
     MW::MWindowDesc desc;
     desc.title  = "Hello MWindow";
-    desc.width  = 1280;
-    desc.height = 720;
+    desc.rect  = {0,0,1280,720};
+    desc.centered = true;
 
     auto window = MW::MWindow::create(desc);
     window->show();
