@@ -2,4 +2,4 @@
 
 include(CMakeFindDependencyMacro)
 
-include("${CMAKE_CURRENT_LIST_DIR}/MLoggerTargets.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/MWindowTargets.cmake")
