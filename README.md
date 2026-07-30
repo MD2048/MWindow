@@ -9,6 +9,9 @@ MWindow is a thin, cross-platform C++17 window abstraction library for multi-thr
 - Propagating event handler chains with explicit consume/continue control
 - Logical coordinate system — DPI handling done internally
 - Thread-safe state reads, command-queued state writes
+- Window icon, set at creation or at runtime (raw RGBA8 pixel buffer, no codec deps)
+- Custom cursor sprite, set at creation or at runtime (raw RGBA8 + hotspot, no codec deps)
+- Mouse capture with optional cursor hiding (main-thread-only API — see docs/Threading.md)
 - Gamepad support
 - Touch and stylus support
 - Monitor enumeration with HDR and DPI info

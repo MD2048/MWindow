@@ -30,6 +30,9 @@ namespace MW {
             RECT preFullscreenRect{};   // not adjusted for physical DPI
                                         // exstyle is always WS_EX_APPWINDOW
             MWindowDesc desc{};
+
+            uint64_t iconVersion = 0;
+            uint64_t cursorVersion = 0;
         };
 
     private:
@@ -48,6 +51,14 @@ namespace MW {
         MWindowState* front_state = nullptr;
         MWindowState state1{};
         MWindowState state2{};
+
+        HICON icon_handle = nullptr;     // owned; DestroyIcon'd on replace/destroy
+        HCURSOR cursor_handle = nullptr; // owned; DestroyCursor'd on replace/destroy
+
+        bool mouseCaptured = false;
+        bool captureHidCursor = false;   // whether *this* capture session called ShowCursor(FALSE)
+
+        void releaseMouseCaptureInternal();
 
     public:
         MWindowImpl(const MWindowDesc& desc);
@@ -73,6 +84,15 @@ namespace MW {
         // Properties (all logical)
         void setTitle(const std::string& title) override;
         const std::string& getTitle() const override;
+
+        void setIcon(const MIconData& icon) override;
+        void setCursor(const MCursorData& cursor) override;
+        HCURSOR getCursorHandle() const { return cursor_handle; }
+
+        bool startMouseCapture(bool hideCursor) override;
+        void endMouseCapture() override;
+        [[nodiscard]] bool isMouseCaptured() const override;
+        void updateCaptureClip();   // recomputes/re-applies ClipCursor; called from MWindowWndProc too
 
         void resize(MSize sz) override;
         MSize getSize() const override; 

@@ -3,9 +3,12 @@
 
 #include "MWindow/MMonitor.h"
 #include "MWindow/MNativeWindow.h"
+#include "MWindow/MIcon.h"
+#include "MWindow/MCursor.h"
 
 #include <cstdint>
 #include <string>
+#include <optional>
 
 namespace MW
 {
@@ -25,6 +28,9 @@ namespace MW
         bool centered   = true;
 
         MMonitorID monitor;
+
+        std::optional<MIconData> icon;   // nullopt = OS default icon
+        std::optional<MCursorData> cursor;   // nullopt = OS default cursor
     };
 
     struct MInitConfig {

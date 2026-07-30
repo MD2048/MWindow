@@ -3,6 +3,8 @@
 
 #include "MWindow/MDevices.h"
 #include "MWindow/MMonitor.h"
+#include "MWindow/MIcon.h"
+#include "MWindow/MCursor.h"
 
 #include <algorithm>
 #include <limits>
@@ -65,6 +67,118 @@ inline std::string toNarrow(const std::wstring& wstr)
     std::string result(size, 0);
     WideCharToMultiByte(CP_UTF8, 0, wstr.data(), (int)wstr.size(), result.data(), size, nullptr, nullptr);
     return result;
+}
+
+inline HICON createHIconFromRGBA(const MIconData& icon)
+{
+    if (icon.width == 0 || icon.height == 0) return nullptr;
+    if (icon.pixels.size() != static_cast<size_t>(icon.width) * icon.height * 4) return nullptr;
+
+    BITMAPV5HEADER bi{};
+    bi.bV5Size        = sizeof(bi);
+    bi.bV5Width       = static_cast<LONG>(icon.width);
+    bi.bV5Height      = -static_cast<LONG>(icon.height); // negative => top-down DIB
+    bi.bV5Planes      = 1;
+    bi.bV5BitCount    = 32;
+    bi.bV5Compression = BI_BITFIELDS;
+    bi.bV5RedMask     = 0x00FF0000;
+    bi.bV5GreenMask   = 0x0000FF00;
+    bi.bV5BlueMask    = 0x000000FF;
+    bi.bV5AlphaMask   = 0xFF000000;
+
+    void* bits = nullptr;
+    HDC screenDC = GetDC(nullptr);
+    HBITMAP hbmColor = CreateDIBSection(screenDC, reinterpret_cast<BITMAPINFO*>(&bi),
+                                         DIB_RGB_COLORS, &bits, nullptr, 0);
+    ReleaseDC(nullptr, screenDC);
+    if (!hbmColor) return nullptr;
+
+    auto* dst = static_cast<uint8_t*>(bits);
+    const uint8_t* src = icon.pixels.data();
+    const size_t count = static_cast<size_t>(icon.width) * icon.height;
+    for (size_t i = 0; i < count; ++i) {
+        dst[i*4 + 0] = src[i*4 + 2]; // B
+        dst[i*4 + 1] = src[i*4 + 1]; // G
+        dst[i*4 + 2] = src[i*4 + 0]; // R
+        dst[i*4 + 3] = src[i*4 + 3]; // A
+    }
+
+    // All-zero (opaque) 1bpp AND mask — standard technique for 32bpp icons
+    // whose alpha channel already carries real transparency.
+    const int strideBytes = ((icon.width + 15) / 16) * 2; // word-aligned 1bpp rows
+    std::vector<uint8_t> maskBits(static_cast<size_t>(strideBytes) * icon.height, 0);
+    HBITMAP hbmMask = CreateBitmap(static_cast<int>(icon.width), static_cast<int>(icon.height),
+                                    1, 1, maskBits.data());
+    if (!hbmMask) { DeleteObject(hbmColor); return nullptr; }
+
+    ICONINFO ii{};
+    ii.fIcon    = TRUE;
+    ii.hbmMask  = hbmMask;
+    ii.hbmColor = hbmColor;
+
+    HICON hIcon = CreateIconIndirect(&ii);
+
+    // CreateIconIndirect copies both bitmaps internally — we still own these handles.
+    DeleteObject(hbmColor);
+    DeleteObject(hbmMask);
+
+    return hIcon; // may be nullptr on failure — caller must check
+}
+
+inline HCURSOR createHCursorFromRGBA(const MCursorData& cursor)
+{
+    if (cursor.width == 0 || cursor.height == 0) return nullptr;
+    if (cursor.pixels.size() != static_cast<size_t>(cursor.width) * cursor.height * 4) return nullptr;
+
+    BITMAPV5HEADER bi{};
+    bi.bV5Size        = sizeof(bi);
+    bi.bV5Width       = static_cast<LONG>(cursor.width);
+    bi.bV5Height      = -static_cast<LONG>(cursor.height); // negative => top-down DIB
+    bi.bV5Planes      = 1;
+    bi.bV5BitCount    = 32;
+    bi.bV5Compression = BI_BITFIELDS;
+    bi.bV5RedMask     = 0x00FF0000;
+    bi.bV5GreenMask   = 0x0000FF00;
+    bi.bV5BlueMask    = 0x000000FF;
+    bi.bV5AlphaMask   = 0xFF000000;
+
+    void* bits = nullptr;
+    HDC screenDC = GetDC(nullptr);
+    HBITMAP hbmColor = CreateDIBSection(screenDC, reinterpret_cast<BITMAPINFO*>(&bi),
+                                         DIB_RGB_COLORS, &bits, nullptr, 0);
+    ReleaseDC(nullptr, screenDC);
+    if (!hbmColor) return nullptr;
+
+    auto* dst = static_cast<uint8_t*>(bits);
+    const uint8_t* src = cursor.pixels.data();
+    const size_t count = static_cast<size_t>(cursor.width) * cursor.height;
+    for (size_t i = 0; i < count; ++i) {
+        dst[i*4 + 0] = src[i*4 + 2]; // B
+        dst[i*4 + 1] = src[i*4 + 1]; // G
+        dst[i*4 + 2] = src[i*4 + 0]; // R
+        dst[i*4 + 3] = src[i*4 + 3]; // A
+    }
+
+    const int strideBytes = ((cursor.width + 15) / 16) * 2; // word-aligned 1bpp rows
+    std::vector<uint8_t> maskBits(static_cast<size_t>(strideBytes) * cursor.height, 0);
+    HBITMAP hbmMask = CreateBitmap(static_cast<int>(cursor.width), static_cast<int>(cursor.height),
+                                    1, 1, maskBits.data());
+    if (!hbmMask) { DeleteObject(hbmColor); return nullptr; }
+
+    ICONINFO ii{};
+    ii.fIcon    = FALSE;
+    ii.xHotspot = cursor.hotspotX;
+    ii.yHotspot = cursor.hotspotY;
+    ii.hbmMask  = hbmMask;
+    ii.hbmColor = hbmColor;
+
+    HCURSOR hCursor = static_cast<HCURSOR>(CreateIconIndirect(&ii));
+
+    // CreateIconIndirect copies both bitmaps internally — we still own these handles.
+    DeleteObject(hbmColor);
+    DeleteObject(hbmMask);
+
+    return hCursor; // may be nullptr on failure — caller must check
 }
 
 template<class... Ts>

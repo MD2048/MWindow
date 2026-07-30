@@ -64,7 +64,10 @@ namespace MW {
 
         virtual void               setTitle(const std::string& title) = 0;
         virtual const std::string& getTitle() const = 0;
-        
+
+        virtual void setIcon(const MIconData& icon) = 0;
+        virtual void setCursor(const MCursorData& cursor) = 0;
+
         // Every coordinate in logical desktop space
 
         virtual void     resize(MSize sz) = 0;
@@ -86,6 +89,13 @@ namespace MW {
         virtual MSize getPhysicalSize() const = 0;
 
         virtual MNativeWindow getNativeWindow() const = 0;
+
+        // MAIN-THREAD ONLY — unlike every other method here. Executes synchronously:
+        // returns false immediately unless this window is currently focused AND the
+        // cursor is inside its client area. See docs/Threading.md.
+        virtual bool startMouseCapture(bool hideCursor = true) = 0;
+        virtual void endMouseCapture() = 0;
+        [[nodiscard]] virtual bool isMouseCaptured() const = 0;
 
         [[nodiscard]] static std::unique_ptr<MWindow> create(const MWindowDesc& desc);
     };
@@ -267,6 +277,9 @@ struct MWindowState {
     RECT preFullscreenRect{};   // not adjusted for physical DPI
                                 // exstyle is always WS_EX_APPWINDOW
     MWindowDesc desc{};
+
+    uint64_t iconVersion = 0;   // bumped by setIcon(); diffed front vs back — see section 10
+    uint64_t cursorVersion = 0; // bumped by setCursor(); diffed front vs back — see section 11
 };
 struct MWindowDesc {
     std::string      title   = "MWindow";
@@ -280,6 +293,9 @@ struct MWindowDesc {
     bool centered   = true;
 
     MMonitorID monitor;
+
+    std::optional<MIconData> icon;   // nullopt = OS default icon — see section 10
+    std::optional<MCursorData> cursor;   // nullopt = OS default cursor — see section 11
 };
 ```
 
@@ -336,6 +352,7 @@ void MWindowImpl::close() {
 }
 
 MWindowImpl::~MWindowImpl() {                     // safety net if unique_ptr goes out of scope
+    if(mouseCaptured) releaseMouseCaptureInternal(); // force-release before the HWND dies — see section 12
     alive.store(false,std::memory_order_release);
     if(hwnd)
     {
@@ -396,7 +413,201 @@ SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(global));
 
 ---
 
-## 10. Monitor System
+## 10. Window Icon
+
+### MIconData
+```cpp
+// include/MWindow/MIcon.h
+// Raw RGBA8, row-major, top-to-bottom, straight (non-premultiplied) alpha.
+// pixels.size() must equal width * height * 4.
+struct MIconData {
+    uint32_t              width  = 0;
+    uint32_t              height = 0;
+    std::vector<uint8_t>  pixels;
+};
+```
+`MWindowDesc::icon` is `std::optional<MIconData>` — `nullopt` means "OS default icon." No `.ico`/`.png` parsing lives in MWindow; the caller supplies decoded pixels. One buffer is sent for both Win32 icon slots (`ICON_SMALL`, `ICON_BIG`) — no separate small/large variants.
+
+### Building an HICON from raw RGBA8
+```cpp
+// src/platform/windows/MWindowsHelpers.h
+HICON createHIconFromRGBA(const MIconData& icon);
+```
+- Builds a top-down 32bpp `BITMAPV5HEADER` DIB section via `CreateDIBSection`.
+- Copies pixels swapping R and B — the DIB's `BI_BITFIELDS` layout stores bytes as B,G,R,A in memory, source is RGBA8.
+- Builds an all-zero (opaque) 1bpp AND mask via `CreateBitmap` — standard technique for 32bpp icons whose alpha channel already carries real transparency.
+- `CreateIconIndirect` **copies** both bitmaps internally — the two `HBITMAP`s must be `DeleteObject`'d immediately after regardless of success, or they leak.
+- Returns `nullptr` on zero dimensions or a `pixels.size()` mismatch.
+
+### Application timing — two different code paths
+The icon is **not** applied through the usual diff machinery at construction time, because `state1 = state2;` (end of the `MWindowImpl` constructor) makes front/back state identical before `handleStateRequests()` ever runs — a diff would never fire for it. So:
+
+- **At creation:** if `desc.icon` has a value, build the `HICON` and `SendMessageW(hwnd, WM_SETICON, ...)` directly, right after `CreateWindowExW` succeeds.
+- **At runtime (`setIcon()`):** goes through the normal double-buffered diff path — an `iconVersion` counter (not `MIconData` equality) is bumped in the setter and diffed in `handleStateRequests()`, avoiding an O(n) buffer comparison on every unrelated state change.
+
+```cpp
+// MWindowState (see section 7) — internal bookkeeping only, not part of MWindowDesc
+uint64_t iconVersion = 0;
+
+void MWindowImpl::setIcon(const MIconData& icon) {
+    assert(icon.pixels.size() == static_cast<size_t>(icon.width) * icon.height * 4);
+    std::lock_guard<std::mutex> lock(back_state_lock);
+    MWindowState& state = *getBackStatePtr();
+    state.desc.icon = icon;   // copy — caller keeps ownership of their buffer
+    state.iconVersion++;      // always bump — no early-out, unlike setTitle
+    state_change.store(true, std::memory_order_release);
+}
+```
+
+### Ownership and cleanup
+The live `HICON` is a plain member of `MWindowImpl` (`icon_handle`), **not** stored inside the double-buffered `MWindowState` — `MWindowState` gets wholesale-copied (`state1 = state2` at construction, `*back = *front` in `syncState()`), and a raw handle must have exactly one owner responsible for `DestroyIcon`. The previous `icon_handle` is destroyed right before being replaced (both in the initial apply path — n/a, nothing to replace yet — and in `handleStateRequests()`), and once more in `~MWindowImpl()` for the final one.
+
+### Known limitation
+If `desc.visible == true`, the window is created with `WS_VISIBLE` already set, before the initial `WM_SETICON` call runs a few lines later — a possible one-frame flash of the default OS icon. Pre-existing category of race in window construction (nothing today defers visibility until fully configured); not fixed as a side effect of this feature.
+
+### Shared WNDCLASSEXW — unaffected
+`WM_SETICON` sent to a specific `HWND` overrides any class-level `hIcon`, and each window may want a different icon anyway — the shared `WNDCLASSEXW` registered once in `MGlobal::init()` needs no `hIcon`/`hIconSm` change.
+
+---
+
+## 11. Custom Cursor
+
+### MCursorData
+```cpp
+// include/MWindow/MCursor.h
+// Raw RGBA8, row-major, top-to-bottom, straight (non-premultiplied) alpha.
+// pixels.size() must equal width * height * 4.
+struct MCursorData {
+    uint32_t              width  = 0;
+    uint32_t              height = 0;
+    std::vector<uint8_t>  pixels;
+    uint32_t              hotspotX = 0;   // the pixel that tracks the actual pointer position
+    uint32_t              hotspotY = 0;
+};
+```
+Same shape and philosophy as `MIconData` (section 10) — raw pixels only, no `.cur` parsing — plus a hotspot, since a cursor's "position" is one specific pixel within the sprite (e.g. the tip of an arrow), not its bounding box.
+
+### Building an HCURSOR from raw RGBA8
+```cpp
+// src/platform/windows/MWindowsHelpers.h
+HCURSOR createHCursorFromRGBA(const MCursorData& cursor);
+```
+Identical DIB-building recipe to `createHIconFromRGBA` (top-down `BITMAPV5HEADER` DIB section, R/B channel swap, all-zero AND mask), with two differences in the final `ICONINFO`: `fIcon = FALSE`, and `xHotspot`/`yHotspot` set from the input. `CreateIconIndirect` returns the same handle type either way (`HICON`/`HCURSOR` are typedef-identical in Win32) — cast to `HCURSOR` for API clarity. Cleanup uses `DestroyCursor`, the semantically correct call for a `fIcon = FALSE` result (even though it's implemented identically to `DestroyIcon`).
+
+### Application timing — pull, not push (this is the key difference from icons)
+Icons are *pushed*: MWindow explicitly sends `WM_SETICON` whenever the icon changes. Cursors are *pulled*: Windows sends `WM_SETCURSOR` to a window every time the mouse moves over it, asking "what cursor do you want right now?" This means:
+
+- **At creation:** just build `cursor_handle` — no message needs sending. It only needs to be ready by the time the OS asks.
+- **New `WM_SETCURSOR` case in `MWindowWndProc`** (there was none before this feature):
+```cpp
+case WM_SETCURSOR:
+{
+    if(LOWORD(lParam) == HTCLIENT)
+    {
+        HCURSOR h = mw->getCursorHandle();
+        SetCursor(h ? h : LoadCursor(nullptr, IDC_ARROW));
+        return TRUE;
+    }
+    break; // let DefWindowProcW supply resize/move cursors over non-client areas
+}
+```
+- **At runtime (`setCursor()`):** goes through the normal double-buffered diff path (a `cursorVersion` counter, exactly like `iconVersion`). Since there's no message to push, `handleStateRequests()` also proactively calls `SetCursor(cursor_handle)` if `GetCursorPos`+`WindowFromPoint(hwnd) == hwnd` shows the cursor is already hovering — otherwise the visible cursor wouldn't update until the next incidental mouse move.
+
+### Ownership and cleanup
+Same pattern as `icon_handle` (section 10): `cursor_handle` is a plain, singly-owned member of `MWindowImpl`, not stored in the double-buffered `MWindowState`. Destroyed and replaced in `handleStateRequests()`'s diff block, and once more in `~MWindowImpl()`.
+
+---
+
+## 12. Mouse Capture
+
+Unlike every other state-mutating method (`setTitle`, `resize`, `setIcon`, `setCursor`, ...), mouse capture does **not** go through the async double-buffered command queue. `startMouseCapture()` must return `true`/`false` synchronously, describing success *right now* — so it runs its Win32 calls (`ClipCursor`, `ShowCursor`) directly on the calling thread. This is a deliberate, documented exception: **`startMouseCapture()`/`endMouseCapture()` must only be called from the main thread** (see `docs/Threading.md`).
+
+### Precondition check
+```cpp
+bool MWindowImpl::startMouseCapture(bool hideCursor) {
+    if(mouseCaptured) return true;                          // idempotent
+    if(global->capturingWindowId.has_value()) return false;  // mutual exclusion: fail, no steal
+    if(!getFrontStatePtr()->focused) return false;           // focus precondition
+
+    POINT p{};
+    if(!GetCursorPos(&p)) return false;
+    RECT client{}; GetClientRect(hwnd, &client);
+    POINT local = p; ScreenToClient(hwnd, &local);
+    if(!PtInRect(&client, local)) return false;               // cursor-inside-client-area precondition
+    ...
+}
+```
+`focused` is read via `getFrontStatePtr()` (the last-synced/confirmed copy), not the back buffer being mutated mid-frame by `WM_SETFOCUS`/`WM_KILLFOCUS`. There's no existing "cursor inside window" flag reliable enough for a point-in-time synchronous check (`mouseTracking` is a single global enter/leave bookkeeping flag, not per-window state) — a direct `GetCursorPos` + `ScreenToClient` + `PtInRect` query is cheap and correct instead.
+
+### Why capturingWindowId is global, not per-window
+Absolute cursor position (`MMouseState`, read by `MW::getCursorPos()`) is a single instance on `MGlobal`, not duplicated per window — so the "is anybody capturing" marker that gates freezing it must live there too:
+```cpp
+// MGlobalImpl.h
+std::optional<MWindowID> capturingWindowId;
+```
+**Mutual exclusion — explicit decision:** a second `startMouseCapture()` call on a different window while one is already capturing returns `false` (no silent steal). Calling it again on the *same* already-capturing window is a no-op returning `true`.
+
+### Clipping and hiding
+```cpp
+POINT tl{client.left, client.top}, br{client.right, client.bottom};
+ClientToScreen(hwnd, &tl); ClientToScreen(hwnd, &br);
+RECT clip{tl.x, tl.y, br.x, br.y};
+ClipCursor(&clip);             // confines the OS cursor to this window's client rect
+
+if(hideCursor) ShowCursor(FALSE);
+```
+`ShowCursor` uses an internal per-thread reference count, not a simple bool — calling it unbalanced (e.g. hiding twice, or showing without a matching hide) corrupts that count for the whole thread. `captureHidCursor` (a bool on `MWindowImpl`) records whether *this* capture session actually hid the cursor, so release only calls `ShowCursor(TRUE)` when it's balanced.
+
+### Why capture doesn't break relative mouse deltas
+Raw Input's relative-mode delta calculation (`MGlobalImpl.cpp`, `WM_INPUT`'s `RIM_TYPEMOUSE` case) computes `dx`/`dy` straight from the HID report (`ms.lLastX`/`lLastY`), with no dependency on `GetCursorPos` or `ClipCursor` at all:
+```cpp
+} else {
+    float scale = global->monitorFromPoint(msst.p).dpiScale;
+    dx = ms.lLastX / scale;
+    dy = ms.lLastY / scale;
+}
+```
+This is why capture can freeze the *absolute* position while `MMouseMoveEvent` deltas keep flowing normally — they were never coupled in the first place.
+
+### Freezing getCursorPos() — two sites
+1. **`MGlobal::poll()`** — the `GetCursorPos` snapshot is skipped entirely while `capturingWindowId.has_value()`:
+```cpp
+if(!capturingWindowId.has_value())
+{
+    POINT p{}; GetCursorPos(&p);
+    ...
+    msst.p.x = (float)p.x / scale;
+    msst.p.y = (float)p.y / scale;
+}
+```
+2. **A second, easy-to-miss site**: `WM_INPUT`'s absolute-mode branch (`ms.usFlags & MOUSE_MOVE_ABSOLUTE`, used by touch-style-absolute HID transports — RDP sessions, some tablets/VMs) *also* writes `msst.p.x`/`msst.p.y` directly. `dx`/`dy` are still computed unconditionally (relative deltas must keep flowing regardless of the input transport), but the position write itself is gated the same way:
+```cpp
+dx = newX - msst.p.x;
+dy = newY - msst.p.y;
+if(!global->capturingWindowId.has_value()) {
+    msst.p.x = newX;
+    msst.p.y = newY;
+}
+```
+Gating only site #1 would leave `getCursorPos()` silently un-frozen for these devices.
+
+### Force-release safety nets
+An abandoned capture (hidden + clipped cursor, nobody left to release it) is a real trap-the-user bug. Three places force-release, all calling the same private `releaseMouseCaptureInternal()`:
+- `endMouseCapture()` itself (the normal path).
+- `WM_KILLFOCUS` in `MWindowWndProc` — losing focus invalidates the precondition that gated capture in the first place (Alt-Tab, etc.).
+- `~MWindowImpl()` and `handleStateRequests()`'s `!alive` branch (window closing/destroyed while captured).
+
+### Keeping the clip rect in sync
+If the window moves or resizes while captured, the clipped region goes stale unless recomputed. Two sites call `updateCaptureClip()`:
+- `handleStateRequests()`'s tail (after the `mode` diff block) — covers the async `resize()`/`setTopLeftCorner()`/`setWindowMode()` command-queue path.
+- `WM_SIZE`/`WM_MOVE` in `MWindowWndProc`, inside the existing rect-change-detection branches — covers live OS-driven moves/resizes (Aero-snap, `Win+Arrow`, DPI-triggered `SetWindowPos`).
+
+### On release, no cursor warp
+`endMouseCapture()` calls `ClipCursor(nullptr)` and (if it was hidden) `ShowCursor(TRUE)`, then stops — the cursor simply reappears wherever it physically is. No `SetCursorPos` snap-back to where capture started (unlike GLFW's disabled-cursor-mode convention) — a deliberate choice, less jarring.
+
+---
+
+## 13. Monitor System
 
 ### MMonitor struct
 ```cpp
@@ -471,7 +682,7 @@ struct MDisplaySettingChangeEvent {
 
 ---
 
-## 11. Event System
+## 14. Event System
 
 ### Ring buffer
 ```cpp
@@ -569,7 +780,7 @@ void MW::poll() {
 
 ---
 
-## 12. Event Types
+## 15. Event Types
 
 ```cpp
 using MEvent = std::variant <
@@ -682,7 +893,7 @@ struct MDisplayDisconnectedEvent { MMonitorID id; };
 
 ---
 
-## 13. Input Device Philosophy
+## 16. Input Device Philosophy
 
 **Keyboards and mice are merged — no per-device tracking.**
 
@@ -724,7 +935,7 @@ MGamepadState& gpst = std::get<MGamepadState>(inputVec[static_cast<size_t(MDevic
 
 ---
 
-## 14. Raw Input (Keyboard + Mouse)
+## 17. Raw Input (Keyboard + Mouse)
 
 Raw Input goes to the **notification window** via `RIDEV_INPUTSINK`.
 
@@ -784,7 +995,7 @@ if (!(ms.usFlags & MOUSE_MOVE_ABSOLUTE)) {
 
 ---
 
-## 15. WM_CHAR → MCharEvent
+## 18. WM_CHAR → MCharEvent
 
 `TranslateMessage` in `poll()` generates `WM_CHAR` from `WM_KEYDOWN`. Goes to focused window WndProc.
 
@@ -800,7 +1011,7 @@ if (!(ms.usFlags & MOUSE_MOVE_ABSOLUTE)) {
 
 ---
 
-## 16. WM_POINTER (Touch + Stylus)
+## 19. WM_POINTER (Touch + Stylus)
 
 Goes to focused **window WndProc**. `EnableMouseInPointer(FALSE)` ensures touchscreen does not also generate synthetic mouse messages.
 
@@ -836,7 +1047,7 @@ Touchpad clicks also handled in WM_INPUT.
 
 ---
 
-## 17. Mouse Enter/Leave
+## 20. Mouse Enter/Leave
 
 Handled in window WndProc from `WM_MOUSEMOVE` / `WM_MOUSELEAVE`.
 
@@ -866,7 +1077,7 @@ case WM_MOUSELEAVE: {
 
 ---
 
-## 18. MKey Enum
+## 21. MKey Enum
 
 Indexed sequentially from 0. Used as bitset index in `MGlobalInputState::keysHeld`.
 
@@ -997,7 +1208,7 @@ Key E0 disambiguations:
 
 ---
 
-## 19. MMods Struct
+## 22. MMods Struct
 
 ```cpp
 struct MMods {
@@ -1017,7 +1228,7 @@ Left/right variants collapse into single flags.
 
 ---
 
-## 20. Gamepad Input
+## 23. Gamepad Input
 
 ### Backend selection
 ```cpp
@@ -1061,7 +1272,7 @@ Deadzone, normalization applied before storing (~0.1 radial deadzone). Polled in
 
 ---
 
-## 21. Timestamps
+## 24. Timestamps
 
 All event timestamps are `using MMicroSec = uint64_t;` since `MW::init()`.
 
@@ -1087,12 +1298,14 @@ Normal events get the timestamp when they are consumed, all gamepad events share
 
 ---
 
-## 22. Threading Rules
+## 25. Threading Rules
 
 **All Win32 window manipulation must be called from the creator thread** (the thread that called `CreateWindowExW`). Win32 windows have thread affinity — the message queue belongs to the creator thread.
 That is why all the state changing function(```resize()```, ```setWindowMode()```) don't get executed immediately, just at the end of the frame.
 
-## 23. DPI Awareness Setup
+**Exception: `startMouseCapture()`/`endMouseCapture()`** (section 12) don't follow this deferred pattern at all — they run their Win32 calls (`ClipCursor`, `ShowCursor`) inline, synchronously, on whatever thread calls them, because `startMouseCapture()` must return success/failure immediately rather than being queued. As a direct consequence, these two methods are the one part of the public API that must only be called from the main thread — every other setter is safe from any thread precisely because it defers to `handleStateRequests()`.
+
+## 26. DPI Awareness Setup
 
 Called at process start (before any windows are created):
 ```cpp
@@ -1103,7 +1316,7 @@ In PerMonitorV2 mode Windows does not scale or virtualize anything — MWindow h
 
 ---
 
-## 24. AdjustWindowRectExForDpi
+## 27. AdjustWindowRectExForDpi
 
 Used in `resize()` to expand logical client size to physical window size including chrome:
 
@@ -1118,7 +1331,7 @@ SetWindowPos(hwnd, nullptr, 0, 0, r.right-r.left, r.bottom-r.top, SWP_NOMOVE|...
 
 ---
 
-## 25. Win32 Includes Required
+## 28. Win32 Includes Required
 
 ```cpp
 #include <Windows.h>        // Core Win32
@@ -1134,11 +1347,15 @@ SetWindowPos(hwnd, nullptr, 0, 0, r.right-r.left, r.bottom-r.top, SWP_NOMOVE|...
 #include <GameInput.h>      // Link: GameInput.lib
 // XInput fallback:
 #include <Xinput.h>         // Link: Xinput.lib
+// Icon construction (CreateDIBSection, CreateIconIndirect, CreateBitmap):
+// declared in wingdi.h, pulled in transitively via <Windows.h>
+                            // Link: Gdi32.lib (verify at build time — not yet
+                            // explicitly listed in target_link_libraries)
 ```
 
 ---
 
-## 26. Key Design Decisions Summary
+## 29. Key Design Decisions Summary
 
 | Decision | Rationale |
 |---|---|
@@ -1155,5 +1372,16 @@ SetWindowPos(hwnd, nullptr, 0, 0, r.right-r.left, r.bottom-r.top, SWP_NOMOVE|...
 | State cached, getters read cache | No syscalls at read time; WndProc is the single writer |
 | GameInput preferred, XInput fallback | GameInput: no 4-controller limit, proper identity, wheels/sticks |
 | Timestamps in us via QueryPerformanceCounter() | No GetMessageTime() overflow, timestamps matter for ordering only |
+| Icon input is raw RGBA8, not .ico/.png | No image codec dependency; matches the "thin library" philosophy |
+| One icon buffer for ICON_SMALL and ICON_BIG | Simplest API; GDI scales it reasonably; can add dual-buffer variants later |
+| Icon diffed via iconVersion counter, not MIconData equality | Avoids an O(n) buffer comparison on every unrelated state change |
+| icon_handle owned by MWindowImpl, not MWindowState | MWindowState is wholesale-copied (double buffering); a raw HICON needs one owner |
+| Cursor input is raw RGBA8 + hotspot, not .cur | Same "thin library" philosophy as icons |
+| Cursor applied via WM_SETCURSOR, not pushed at set-time | OS re-queries the cursor on every HTCLIENT mouse move; pushing would be redundant/stale |
+| Mouse capture executes synchronously, not queued | ClipCursor/ShowCursor must react to the current OS cursor position at call time |
+| Capture requires focus + cursor-inside-client, checked via GetCursorPos+PtInRect | Cheap, correct, no dependency on message-timing-sensitive mouseTracking flag |
+| Second startMouseCapture() call fails (no auto-steal) | Focus precondition already makes concurrent capture rare; silent steal is surprising |
+| endMouseCapture() does not warp the cursor | Deliberate: less jarring than GLFW's snap-to-start-position |
+| capturingWindowId lives on MGlobal, not per-window | MMouseState (getCursorPos's backing store) is a single global instance |
 | Drop newest on queue overflow | Fastest, easiest |
 | NotificationWndProc + WindowWndProc | Clean separation: global state vs per-window state |

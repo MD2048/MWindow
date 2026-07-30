@@ -127,11 +127,28 @@ namespace MW
                 r.right-r.left,r.bottom-r.top,
                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
         }
+        if(state2.desc.icon.has_value())
+        {
+            icon_handle = createHIconFromRGBA(*state2.desc.icon);
+            if(icon_handle)
+            {
+                SendMessageW(hw, WM_SETICON, ICON_BIG,   (LPARAM)icon_handle);
+                SendMessageW(hw, WM_SETICON, ICON_SMALL, (LPARAM)icon_handle);
+            }
+        }
+        if(state2.desc.cursor.has_value())
+        {
+            // No message to send — the OS pulls the cursor via WM_SETCURSOR on every
+            // mouse move over the client area, so just having cursor_handle ready is enough.
+            cursor_handle = createHCursorFromRGBA(*state2.desc.cursor);
+        }
+
         state1 = state2;
         hwnd = hw;
     }
 
     MWindowImpl::~MWindowImpl() {
+        if(mouseCaptured) releaseMouseCaptureInternal();
         alive.store(false,std::memory_order_release);
         if(hwnd)
         {
@@ -139,6 +156,16 @@ namespace MW
             DestroyWindow(hwnd);
         }
         hwnd = nullptr;
+        if(icon_handle)
+        {
+            DestroyIcon(icon_handle);
+            icon_handle = nullptr;
+        }
+        if(cursor_handle)
+        {
+            DestroyCursor(cursor_handle);
+            cursor_handle = nullptr;
+        }
     }
 
     MWindowID MWindowImpl::getId() const {
@@ -178,6 +205,7 @@ namespace MW
 
         if(!alive.load(std::memory_order_acquire))
         {
+            if(mouseCaptured) releaseMouseCaptureInternal();
             if(hwnd)
             {
                 global->unregisterWindow(id);
@@ -203,6 +231,35 @@ namespace MW
         {
             SetWindowTextW(hwnd, toWide(back.desc.title).c_str());
             front.desc.title = back.desc.title;
+        }
+        if(back.iconVersion != front.iconVersion)
+        {
+            HICON newIcon = back.desc.icon.has_value() ? createHIconFromRGBA(*back.desc.icon) : nullptr;
+            if(newIcon)
+            {
+                SendMessageW(hwnd, WM_SETICON, ICON_BIG,   (LPARAM)newIcon);
+                SendMessageW(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)newIcon);
+
+                if(icon_handle) DestroyIcon(icon_handle);
+                icon_handle = newIcon;
+            }
+            front.desc.icon   = back.desc.icon;
+            front.iconVersion = back.iconVersion;
+        }
+        if(back.cursorVersion != front.cursorVersion)
+        {
+            HCURSOR newCursor = back.desc.cursor.has_value() ? createHCursorFromRGBA(*back.desc.cursor) : nullptr;
+            if(newCursor)
+            {
+                if(cursor_handle) DestroyCursor(cursor_handle);
+                cursor_handle = newCursor;
+
+                POINT p{};
+                if(GetCursorPos(&p) && WindowFromPoint(p) == hwnd)
+                    SetCursor(cursor_handle); // re-apply immediately if already hovered
+            }
+            front.desc.cursor   = back.desc.cursor;
+            front.cursorVersion = back.cursorVersion;
         }
         if(back.desc.rect.size() != front.desc.rect.size())
         {   
@@ -315,7 +372,8 @@ namespace MW
                     rect.bottom - rect.top,
                     SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOACTIVATE);
             }
-        }  
+        }
+        if(mouseCaptured) updateCaptureClip();
     }
 
     void MWindowImpl::syncState() {
@@ -432,6 +490,32 @@ namespace MW
         return getFrontStatePtr()->desc.title;
     }
 
+    void MWindowImpl::setIcon(const MIconData& icon) {
+        assert(icon.pixels.size() == static_cast<size_t>(icon.width) * icon.height * 4
+            && "MWindowImpl::setIcon(): pixel buffer size must equal width * height * 4 (RGBA8)!");
+
+        std::lock_guard<std::mutex> lock(back_state_lock);
+
+        MWindowState& state = *getBackStatePtr();
+
+        state.desc.icon = icon;   // copy — caller retains ownership of their own buffer
+        state.iconVersion++;      // always bump; setIcon() is an explicit, deliberate call
+        state_change.store(true,std::memory_order_release);
+    }
+
+    void MWindowImpl::setCursor(const MCursorData& cursor) {
+        assert(cursor.pixels.size() == static_cast<size_t>(cursor.width) * cursor.height * 4
+            && "MWindowImpl::setCursor(): pixel buffer size must equal width * height * 4 (RGBA8)!");
+
+        std::lock_guard<std::mutex> lock(back_state_lock);
+
+        MWindowState& state = *getBackStatePtr();
+
+        state.desc.cursor = cursor; // copy — caller retains ownership of their own buffer
+        state.cursorVersion++;      // always bump; setCursor() is an explicit, deliberate call
+        state_change.store(true,std::memory_order_release);
+    }
+
     void MWindowImpl::resize(MSize sz) {
         std::lock_guard<std::mutex> lock(back_state_lock);
 
@@ -527,6 +611,69 @@ namespace MW
     MNativeWindow MWindowImpl::getNativeWindow() const {
         return MWindowsNativeWindow{reinterpret_cast<MOpaqueHandle>(hwnd),
             reinterpret_cast<MOpaqueHandle>(GetModuleHandle(nullptr))};
+    }
+
+    // Mouse capture — runs synchronously on the calling thread (main thread only),
+    // unlike every other state-mutating method above which queues via back_state/state_change.
+
+    bool MWindowImpl::startMouseCapture(bool hideCursor) {
+        if(mouseCaptured) return true;                            // idempotent
+        if(global->capturingWindowId.has_value()) return false;    // mutual exclusion: fail, no steal
+        if(!getFrontStatePtr()->focused) return false;
+
+        POINT p{};
+        if(!GetCursorPos(&p)) return false;
+
+        RECT client{};
+        GetClientRect(hwnd, &client);
+        POINT local = p;
+        ScreenToClient(hwnd, &local);
+        if(!PtInRect(&client, local)) return false;                // cursor-inside-client-area check
+
+        POINT tl{client.left, client.top}, br{client.right, client.bottom};
+        ClientToScreen(hwnd, &tl);
+        ClientToScreen(hwnd, &br);
+        RECT clip{tl.x, tl.y, br.x, br.y};
+        if(!ClipCursor(&clip)) return false;
+
+        captureHidCursor = hideCursor;
+        if(hideCursor) ShowCursor(FALSE);
+
+        mouseCaptured = true;
+        global->capturingWindowId = id;
+        return true;
+    }
+
+    void MWindowImpl::endMouseCapture() {
+        if(mouseCaptured) releaseMouseCaptureInternal();
+    }
+
+    bool MWindowImpl::isMouseCaptured() const {
+        return mouseCaptured;
+    }
+
+    void MWindowImpl::releaseMouseCaptureInternal() {
+        ClipCursor(nullptr);
+        if(captureHidCursor)
+        {
+            ShowCursor(TRUE);
+            captureHidCursor = false;
+        }
+        mouseCaptured = false;
+        if(global->capturingWindowId == id)
+            global->capturingWindowId.reset();
+    }
+
+    void MWindowImpl::updateCaptureClip() {
+        if(!mouseCaptured) return;
+
+        RECT client{};
+        GetClientRect(hwnd, &client);
+        POINT tl{client.left, client.top}, br{client.right, client.bottom};
+        ClientToScreen(hwnd, &tl);
+        ClientToScreen(hwnd, &br);
+        RECT clip{tl.x, tl.y, br.x, br.y};
+        ClipCursor(&clip);
     }
 
 } // namespace MW

@@ -34,6 +34,8 @@ window->resize({ 1920, 1080 });
 window->setTopLeftCorner({ 100, 100 });
 window->setWindowMode(MW::MWindowMode::Fullscreen);
 window->setTitle("New Title");
+window->setIcon(myIconData);
+window->setCursor(myCursorData);
 window->show();
 window->hide();
 window->close();
@@ -41,6 +43,18 @@ window->close();
 
 None of these take effect immediately. The confirmed new state is written by `poll()` after the OS acknowledges the change. 
 This also means that if you set something to a different value (eg. resize) and you query the current value this frame you will get the old one.
+
+## Exception: Mouse Capture — Main Thread Only
+
+Unlike every setter above, `startMouseCapture()` / `endMouseCapture()` are **not** queued — they execute Win32 calls (`ClipCursor`, `ShowCursor`) synchronously, on whatever thread calls them. Because Win32 window/cursor state has thread affinity, these two methods **must only be called from the main thread** (the thread that owns the window's message loop / called `MW::poll()`), unlike the rest of the write API which is safe from any thread.
+
+```cpp
+// Main thread only — runs synchronously, returns success/failure immediately
+bool captured = window->startMouseCapture(/*hideCursor=*/true);
+window->endMouseCapture();
+```
+
+`isMouseCaptured()` is a plain state read and safe from any thread, same as `isVisible()`.
 
 ## Event Handlers
 
@@ -57,3 +71,5 @@ Handlers are called during `MW::poll()` on the main thread.
 | Read any state | Any thread |
 | Request state changes | Any thread |
 | `MW::getInputState()` | Any thread — do not cache reference |
+| `startMouseCapture()` / `endMouseCapture()` | Main thread only — synchronous, NOT queued |
+| `isMouseCaptured()` | Any thread (state read) |

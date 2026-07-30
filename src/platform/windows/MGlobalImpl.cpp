@@ -209,9 +209,10 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                 state->desc.rect.height = (float)h / new_mon.dpiScale;
                 mw->setStateChange();
                 global->push(MResizeEvent{state->desc.rect.size()}, hwnd);
+                mw->updateCaptureClip();
 
             }
-            
+
             return 1;
         }
         case WM_MOVE:
@@ -239,6 +240,7 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                 state->desc.rect.y = (float)y / new_mon.dpiScale;
                 mw->setStateChange();
                 global->push(MMoveEvent{state->desc.rect.topLeft()}, hwnd);
+                mw->updateCaptureClip();
             }
 
             return 1;
@@ -276,8 +278,9 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             {
                 state->focused = false;
                 mw->setStateChange();
-                global->push(MFocusChangeEvent{false}, hwnd);   
+                global->push(MFocusChangeEvent{false}, hwnd);
             }
+            mw->endMouseCapture(); // losing focus invalidates capture's precondition; no-op if not captured
 
             return 1;
         }
@@ -300,6 +303,17 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         case WM_ERASEBKGND:
             // Return 1 to prevent GDI clearing the window each frame
             return 1;
+
+        case WM_SETCURSOR:
+        {
+            if(LOWORD(lParam) == HTCLIENT)
+            {
+                HCURSOR h = mw->getCursorHandle();
+                SetCursor(h ? h : LoadCursor(nullptr, IDC_ARROW));
+                return TRUE;
+            }
+            break; // let DefWindowProcW set resize/move cursors over non-client areas
+        }
 
         case WM_POINTERENTER: {
             POINTER_INFO pi{};
@@ -548,8 +562,10 @@ LRESULT CALLBACK NotificationWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 
                             dx = newX - msst.p.x;
                             dy = newY - msst.p.y;
-                            msst.p.x = newX;
-                            msst.p.y = newY;
+                            if(!global->capturingWindowId.has_value()) {
+                                msst.p.x = newX;
+                                msst.p.y = newY;
+                            }
                         } else {
                             float scale = global->monitorFromPoint(msst.p).dpiScale;
 
@@ -805,14 +821,17 @@ namespace MW {
         
         assert(IsWindow(reinterpret_cast<HWND>(notificationHWND)));
 
-        POINT p{};
-        GetCursorPos(&p);
-        HANDLE hMon = MonitorFromPoint(p, MONITOR_DEFAULTTONEAREST);
-        float scale = dpiFromHandle(hMon);
-        auto* state = getBackStatePtr();
-        auto& msst = std::get<MMouseState>((*state)[(size_t)MW::MDeviceType::Mouse]);
-        msst.p.x = (float)p.x / scale;
-        msst.p.y = (float)p.y / scale;
+        if(!capturingWindowId.has_value())
+        {
+            POINT p{};
+            GetCursorPos(&p);
+            HANDLE hMon = MonitorFromPoint(p, MONITOR_DEFAULTTONEAREST);
+            float scale = dpiFromHandle(hMon);
+            auto* state = getBackStatePtr();
+            auto& msst = std::get<MMouseState>((*state)[(size_t)MW::MDeviceType::Mouse]);
+            msst.p.x = (float)p.x / scale;
+            msst.p.y = (float)p.y / scale;
+        }
 
         MSG msg;
         while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {

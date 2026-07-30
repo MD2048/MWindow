@@ -6,6 +6,8 @@
 #include "MWindow/MWindowInit.h"
 #include "MWindow/MDef.h"
 #include "MWindow/MNativeWindow.h"
+#include "MWindow/MIcon.h"
+#include "MWindow/MCursor.h"
 
 #include <cstdint>
 #include <vector>
@@ -65,7 +67,10 @@ namespace MW {
 
         virtual void               setTitle(const std::string& title) = 0;
         virtual const std::string& getTitle() const = 0;
-        
+
+        virtual void setIcon(const MIconData& icon) = 0;
+        virtual void setCursor(const MCursorData& cursor) = 0;
+
         // Every coordinate in logical desktop space
 
         virtual void     resize(MSize sz) = 0;
@@ -87,6 +92,11 @@ namespace MW {
         virtual MSize getPhysicalSize() const = 0;
 
         virtual MNativeWindow getNativeWindow() const = 0;
+
+        // MAIN-THREAD ONLY
+        virtual bool startMouseCapture(bool hideCursor = true) = 0;
+        virtual void endMouseCapture() = 0;
+        [[nodiscard]] virtual bool isMouseCaptured() const = 0;
 
         [[nodiscard]] static std::unique_ptr<MWindow> create(const MWindowDesc& desc);
     };

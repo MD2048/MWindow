@@ -15,6 +15,66 @@ namespace {
         return MEventResult::Consumed;
     }
 
+    // 8x8-block RGBA8 checkerboard, easy to eyeball in the titlebar/taskbar/Alt-Tab.
+    MIconData makeCheckerIcon(uint32_t size, uint8_t r1, uint8_t g1, uint8_t b1,
+                                             uint8_t r2, uint8_t g2, uint8_t b2)
+    {
+        MIconData icon;
+        icon.width = size;
+        icon.height = size;
+        icon.pixels.resize(static_cast<size_t>(size) * size * 4);
+
+        for (uint32_t y = 0; y < size; ++y) {
+            for (uint32_t x = 0; x < size; ++x) {
+                bool useFirst = ((x / 8) + (y / 8)) % 2 == 0;
+                size_t i = (static_cast<size_t>(y) * size + x) * 4;
+                icon.pixels[i + 0] = useFirst ? r1 : r2;
+                icon.pixels[i + 1] = useFirst ? g1 : g2;
+                icon.pixels[i + 2] = useFirst ? b1 : b2;
+                icon.pixels[i + 3] = 255;
+            }
+        }
+        return icon;
+    }
+
+    MIconData makeSolidIcon(uint32_t size, uint8_t r, uint8_t g, uint8_t b)
+    {
+        MIconData icon;
+        icon.width = size;
+        icon.height = size;
+        icon.pixels.resize(static_cast<size_t>(size) * size * 4);
+        for (size_t i = 0; i < icon.pixels.size(); i += 4) {
+            icon.pixels[i + 0] = r;
+            icon.pixels[i + 1] = g;
+            icon.pixels[i + 2] = b;
+            icon.pixels[i + 3] = 255;
+        }
+        return icon;
+    }
+
+    // Crosshair cursor, hotspot at the exact center (the pixel the OS tracks as "the pointer").
+    MCursorData makeCrosshairCursor(uint32_t size, uint8_t r, uint8_t g, uint8_t b)
+    {
+        MCursorData cursor;
+        cursor.width = size;
+        cursor.height = size;
+        cursor.pixels.assign(static_cast<size_t>(size) * size * 4, 0); // transparent background
+        cursor.hotspotX = size / 2;
+        cursor.hotspotY = size / 2;
+
+        for (uint32_t i = 0; i < size; ++i) {
+            for (uint32_t t = 0; t < 2; ++t) { // 2px thick lines
+                size_t rowPix = (static_cast<size_t>(size / 2 + t) * size + i) * 4;
+                size_t colPix = (static_cast<size_t>(i) * size + size / 2 + t) * 4;
+                cursor.pixels[rowPix + 0] = r; cursor.pixels[rowPix + 1] = g;
+                cursor.pixels[rowPix + 2] = b; cursor.pixels[rowPix + 3] = 255;
+                cursor.pixels[colPix + 0] = r; cursor.pixels[colPix + 1] = g;
+                cursor.pixels[colPix + 2] = b; cursor.pixels[colPix + 3] = 255;
+            }
+        }
+        return cursor;
+    }
+
     void printWindowApi(MWindow& window)
     {
         std::cout << "window id: " << window.getId() << '\n';
@@ -84,10 +144,13 @@ int main()
     desc.decorated = true;
     desc.visible = true;
     desc.centered = true;
+    desc.icon = makeCheckerIcon(32, 255, 0, 0, 0, 0, 255); // red/blue checkerboard
+    desc.cursor = makeCrosshairCursor(32, 255, 255, 0);    // yellow crosshair
 
     if (auto primary = getPrimaryMonitor()) {
         desc.monitor = primary->id;
     }
+    desc.monitor = 0;
 
     auto window = MWindow::create(desc);
     if (!window) {
@@ -100,13 +163,45 @@ int main()
         std::cout << "Window event: " << ev << '\n';
         if(std::holds_alternative<MCloseRequestEvent>(ev))
             mw->close();
+        if (auto* kp = std::get_if<MKeyPressEvent>(&ev)) {
+            if (kp->key == MKey::C) {
+                if (mw->isMouseCaptured()) {
+                    mw->endMouseCapture();
+                    std::cout << "endMouseCapture() called\n";
+                } else {
+                    bool ok = mw->startMouseCapture(true);
+                    std::cout << "startMouseCapture() -> " << (ok ? "true" : "false") << '\n';
+                }
+            }
+        }
         return MEventResult::Consumed;
     });
 
     printWindowApi(*window);
 
-    for (int i = 0; i < 20 && window->isAlive(); ++i) {
+    const MIconData greenIcon = makeSolidIcon(32, 0, 255, 0);
+    const MIconData checkerIcon = makeCheckerIcon(32, 255, 0, 0, 0, 0, 255);
+    const MCursorData magentaCrosshair = makeCrosshairCursor(32, 255, 0, 255);
+
+    for (int i = 0; i < 300 && window->isAlive(); ++i) {
         poll();
+
+        if (i == 20) {
+            window->setIcon(greenIcon);
+        }
+        if (i >= 30 && i < 80) {
+            // Repeated setIcon() calls: watch Task Manager's "GDI objects" column for
+            // hello.exe (Details tab) to confirm the count stays flat, not growing by 1/call.
+            window->setIcon((i % 2 == 0) ? greenIcon : checkerIcon);
+        }
+        if (i == 90) {
+            window->setCursor(magentaCrosshair); // runtime setCursor(): should update live while hovering
+        }
+        if (i % 20 == 0) {
+            std::cout << "cursor pos: " << getCursorPos()
+                      << " captured: " << window->isMouseCaptured() << '\n';
+        }
+
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 

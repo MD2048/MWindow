@@ -103,6 +103,8 @@ namespace MW {
         bool mouseTracking;
         wchar_t pendingSurrogate; // for WM_CHAR surrogate pair handling
 
+        std::optional<MWindowID> capturingWindowId; // nullopt = nobody capturing the mouse
+
         // Lifecycle and callbacks
         MGlobal(const MInitConfig& config);
 
