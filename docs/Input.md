@@ -9,6 +9,14 @@ bool held = MW::isKeyHeld(MW::MKey::Space);
 MMods mods = MW::getMods();
 ```
 
+By default, keyboard and mouse state keep tracking even while none of your windows are focused (e.g. alt-tabbed away). Opt into focus-gating instead:
+
+```cpp
+MInitConfig config;
+config.ignoreUnfocusedInput = true;
+MW::init(config);
+```
+
 ### MKey
 
 `MKey` represents a physical key position (scancode-based). It is layout-independent — `MKey::A` always refers to the key in the A position regardless of the user's keyboard layout.

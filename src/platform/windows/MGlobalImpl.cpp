@@ -484,6 +484,9 @@ LRESULT CALLBACK NotificationWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
     {
         case WM_INPUT:
         {
+            if(global->settings.ignoreUnfocusedInput && !global->getFocusedID().has_value())
+                return 0;
+
             UINT size = 0;
             GetRawInputData(
                 reinterpret_cast<HRAWINPUT>(lParam),

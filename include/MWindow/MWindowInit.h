@@ -41,6 +41,12 @@ namespace MW
         bool touchMoveCoalescing    = true;
         bool stylusMoveCoalescing   = true;
         bool gamepadCoalescing      = true;
+
+        // If true, raw keyboard/mouse input is ignored while no window is focused
+        // (e.g. alt-tabbed away). Default false: global input state (isKeyHeld(),
+        // getInputState(), etc.) keeps tracking regardless of focus, matching
+        // today's documented behavior.
+        bool ignoreUnfocusedInput  = false;
     };
 
     struct MEventHandlerEntry {

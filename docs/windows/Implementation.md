@@ -737,6 +737,8 @@ struct MInitConfig {
     bool touchMoveCoalescing    = true;
     bool stylusMoveCoalescing   = true;
     bool gamepadCoalescing      = true;
+
+    bool ignoreUnfocusedInput   = false;   // see section 17 — Raw Input
 };
 ```
 
@@ -938,6 +940,20 @@ MGamepadState& gpst = std::get<MGamepadState>(inputVec[static_cast<size_t(MDevic
 ## 17. Raw Input (Keyboard + Mouse)
 
 Raw Input goes to the **notification window** via `RIDEV_INPUTSINK`.
+
+### Background input
+`RIDEV_INPUTSINK` means the notification window receives `WM_INPUT` even when no window in the app is focused — that's the default (global input tracking, `isKeyHeld()`/`getInputState()` stay live regardless of focus). Registering without `RIDEV_INPUTSINK` isn't a workable alternative here: the notification window is never itself shown/focused, so it would simply stop receiving anything.
+
+Instead, `MInitConfig::ignoreUnfocusedInput` (default `false`) filters at the top of the `WM_INPUT` case:
+```cpp
+case WM_INPUT:
+{
+    if(global->settings.ignoreUnfocusedInput && !global->getFocusedID().has_value())
+        return 0;
+    ...
+}
+```
+The OS still delivers the message either way — this just skips updating state/pushing events when nothing owns focus. Cheap, and keeps the two-WndProc separation (section 6) intact rather than moving `WM_INPUT` handling into per-window `MWindowWndProc`.
 
 ### Discard rule
 ```cpp
