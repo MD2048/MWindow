@@ -6,26 +6,49 @@ All events are held in a `std::variant`:
 
 ```cpp
 using MEvent = std::variant<
+    std::monostate,          // empty/default slot; never delivered to handlers
+
+    MVisibilityChangeEvent,
     MCloseRequestEvent,
     MResizeEvent,
     MMoveEvent,
-    MFocusEvent,
-    MVisibilityEvent,
-    MDpiChangedEvent,
-    MKeyEvent,
+    MFocusChangeEvent,
+    MMonitorChangeEvent,
+
+    MKeyPressEvent,
+    MKeyReleaseEvent,
     MCharEvent,
-    MMouseButtonEvent,
+
+    MMouseMoveEvent,
+    MMouseButtonPressEvent,
+    MMouseButtonReleaseEvent,
     MMouseScrollEvent,
     MMouseEnterEvent,
     MMouseLeaveEvent,
+
     MTouchBeginEvent,
     MTouchMoveEvent,
     MTouchEndEvent,
     MTouchCancelEvent,
-    MDropEnterEvent,
-    MDropMoveEvent,
-    MDropLeaveEvent,
-    MDropEvent
+
+    MGamepadConnectedEvent,
+    MGamepadDisconnectedEvent,
+    MGamepadButtonPressEvent,
+    MGamepadButtonReleaseEvent,
+    MGamepadTriggerEvent,
+    MGamepadStickEvent,
+
+    MStylusEnterEvent,
+    MStylusHoverEvent,
+    MStylusLeaveEvent,
+    MStylusDownEvent,
+    MStylusMoveEvent,
+    MStylusUpEvent,
+    MStylusCancelEvent,
+
+    MDisplaySettingChangeEvent,
+    MDisplayConnectedEvent,
+    MDisplayDisconnectedEvent
 >;
 ```
 
@@ -33,7 +56,7 @@ Use `std::get_if` or `std::visit` to handle events:
 
 ```cpp
 window->registerEventHandler([](const MW::MEvent& e) {
-    if (auto* key = std::get_if<MW::MKeyEvent>(&e)) {
+    if (auto* key = std::get_if<MW::MKeyPressEvent>(&e)) {
         if (key->key == MW::MKey::Escape)
             return MW::MEventResult::Consumed;
     }
@@ -71,8 +94,8 @@ MW::unregisterGlobalEventHandler(id);
 | `MCloseRequestEvent` | empty | OS or user requested close. App controls destruction. |
 | `MResizeEvent` | `MSize new_size` | Logical pixels |
 | `MMoveEvent` | `MPoint new_pos` | Logical, virtual desktop space |
-| `MFocusEvent` | `bool focused` | |
-| `MVisibilityEvent` | `bool isVisible` | false when minimized |
+| `MFocusChangeEvent` | `bool focused` | Pushed on creation too, if the window gets initial focus |
+| `MVisibilityChangeEvent` | `bool isVisible` | false when minimized |
 | `MMonitorChangeEvent` | MMonitorID old_mon, MMonitorID new_mon | Resize your swapchain |
 
 ### Keyboard Events
@@ -138,9 +161,7 @@ MW::unregisterGlobalEventHandler(id);
 
 ### Drag & Drop
 
-Event types are defined but platform implementations are not yet complete.
-
-`MDropEnterEvent`, `MDropMoveEvent`, `MDropLeaveEvent`, `MDropEvent { MPoint pos; std::vector<std::string> files; }`
+Not implemented yet — no event types exist in `MEvent` for this. Planned for a future version.
 
 ## Ring Buffer & Coalescing
 
@@ -153,20 +174,25 @@ High-frequency events of the same type are merged before the app sees them, but 
 | Visibility change | `Latest` — keep only the final state |
 | Resize | `Latest` |
 | Move | `Latest` |
+| Focus change | `Latest` — keep only the final state |
 | Char input | `Accumulate` — merge strings |
-| Mouse move | `Latest` — keep only the final position |
+| Mouse move | `Latest` — keep only the final delta |
 | Mouse scroll | `Accumulate` — sum dx/dy |
-| Touch move | `Latest` |
-| Stylus move/hover | `Accumulate` — sum dx/dy |
+| Touch move | `Latest` position + `Accumulate` delta — new_pos replaced, dx/dy summed |
+| Stylus move/hover | `Accumulate` — sum dx/dy (position also replaced with the latest) |
 | Gamepad trigger/stick | `Accumulate` — sum dx/dy |
 | Everything else | `None` — every event preserved |
 
-Configure at init:
+`Visibility change`, `Resize`, `Move`, and `Focus change` always coalesce unconditionally. Every other configurable row above is gated by a plain on/off flag in `MInitConfig` — there is no per-event-type merge *strategy* setting; the strategy itself (replace vs. accumulate) is fixed in code, only whether coalescing happens at all is configurable:
 
 ```cpp
 MW::MInitConfig config;
-config.eventQueueCapacity = 512;  // must be power of 2
-config.scrollPolicy = MW::MCoalescePolicy::Accumulate;
+config.eventQueueCapacity = 512;   // must be power of 2
+config.mouseMoveCoalescing = true;
+config.scrollCoalescing = true;
+config.touchMoveCoalescing = true;
+config.stylusMoveCoalescing = true;
+config.gamepadCoalescing = true;
 MW::init(config);
 ```
 

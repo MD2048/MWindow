@@ -242,15 +242,15 @@ Handles per-window state. Registered for all real windows.
 
 ```
 WM_CLOSE              →  push MCloseRequestEvent only, do NOT DestroyWindow
-WM_DESTROY            →  cleanup state, remove from global list
-WM_SIZE               →  update physicalSize, logicalSize, visible flag
-WM_MOVE               →  update topLeft
+WM_SIZE               →  update physicalSize, logicalSize, visible flag; re-clip if capturing
+WM_MOVE               →  update topLeft; re-clip if capturing
 WM_WINDOWPOSCHANGED   →  update monitorId; always call DefWindowProc
 WM_DPICHANGED         →  update dpiScale, SetWindowPos with suggested rect
 WM_SETFOCUS           →  push MFocusChangeEvent{true}
-WM_KILLFOCUS          →  push MFocusChangeEvent{false}
+WM_KILLFOCUS          →  push MFocusChangeEvent{false}; force-release mouse capture
 WM_SHOWWINDOW         →  update visible state
 WM_ERASEBKGND         →  return 1 (prevent GDI flicker)
+WM_SETCURSOR          →  SetCursor(window's cursor_handle) when over HTCLIENT
 WM_MOUSEMOVE          →  mouse enter/leave tracking + touchpad input
 WM_MOUSELEAVE         →  push MMouseLeaveEvent
 WM_CHAR               →  push MCharEvent (UTF-8)
@@ -262,6 +262,7 @@ WM_POINTERENTER       →  stylus enter hover range
 WM_POINTERLEAVE       →  stylus leave hover range
 WM_POINTERCAPTURECHANGED → touch cancel / stylus cancel
 ```
+`WM_DESTROY` is intentionally unhandled — `unregisterWindow()` always runs before `DestroyWindow()` (see "Window Lifecycle & Destruction" below), so by the time `WM_DESTROY` synchronously fires, `MWindowWndProc`'s own "unknown window" guard has already stopped it from reaching this switch at all.
 
 ---
 
@@ -411,6 +412,22 @@ SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(global));
 // Recalculate DPI, center window
 ```
 
+### Initial messages are dropped, and why that's mostly fine
+`CreateWindowExW` with `WS_VISIBLE` set synchronously dispatches several messages (`WM_SETFOCUS`, `WM_SIZE`, `WM_SHOWWINDOW`, ...) *before it returns* — before `GWLP_USERDATA` above is even set, so `MWindowWndProc` can't resolve the window yet and silently drops them via its "unknown window" guard.
+
+This doesn't corrupt state: `MWindowState` is computed directly from `desc` and window-creation-time queries throughout this constructor, not by catching those particular messages. The one real, unrecoverable gap is the initial `MFocusChangeEvent` — there's no `isFocused()` accessor anywhere in the public API, so that event is the *only* way an app can ever learn its window has focus. (`MResizeEvent`/`MMoveEvent`/`MVisibilityChangeEvent` aren't similarly unrecoverable — `getRect()`/`getSize()`/`isVisible()` are synchronously queryable any time after `create()` returns.)
+
+Fixed by querying and pushing it manually, right after the window is registered (so `push()` can resolve it) and `GWLP_USERDATA` is set:
+```cpp
+bool hasFocus = (GetFocus() == hw);
+state2.focused = hasFocus;
+if(hasFocus)
+    global->push(MFocusChangeEvent{true}, hw);
+```
+Safe to query `GetFocus()` here specifically because every `SetWindowPos` call later in the constructor (centering, DPI rect adjustment) passes `SWP_NOACTIVATE`, so nothing after this point changes activation.
+
+Considered and rejected: capturing `GWLP_USERDATA` earlier via `WM_NCCREATE`'s `lpCreateParams` (the general Win32-idiomatic fix, used by GLFW/SDL/Qt) would catch every dropped message, not just focus — but it also requires moving `registerWindow()` itself into the `WM_NCCREATE` handler, since `MWindowWndProc` needs both `global` *and* the registry entry to resolve `mw`. That's a real restructuring of window-creation/registration order for messages the app was never actually blind to (state-wise) in the first place — not worth it for the one gap that actually mattered.
+
 ---
 
 ## 10. Window Icon
@@ -537,7 +554,7 @@ bool MWindowImpl::startMouseCapture(bool hideCursor) {
     ...
 }
 ```
-`focused` is read via `getFrontStatePtr()` (the last-synced/confirmed copy), not the back buffer being mutated mid-frame by `WM_SETFOCUS`/`WM_KILLFOCUS`. There's no existing "cursor inside window" flag reliable enough for a point-in-time synchronous check (`mouseTracking` is a single global enter/leave bookkeeping flag, not per-window state) — a direct `GetCursorPos` + `ScreenToClient` + `PtInRect` query is cheap and correct instead.
+`focused` is read via `getFrontStatePtr()` (the last-synced/confirmed copy), not the back buffer being mutated mid-frame by `WM_SETFOCUS`/`WM_KILLFOCUS`. There's no existing "cursor inside window" flag reliable enough for a point-in-time synchronous check (`mouseTracking`, even as per-window state — see section 20, is enter/leave bookkeeping driven by message arrival, not something safe to sample synchronously at an arbitrary call time) — a direct `GetCursorPos` + `ScreenToClient` + `PtInRect` query is cheap and correct instead.
 
 ### Why capturingWindowId is global, not per-window
 Absolute cursor position (`MMouseState`, read by `MW::getCursorPos()`) is a single instance on `MGlobal`, not duplicated per window — so the "is anybody capturing" marker that gates freezing it must live there too:
@@ -569,27 +586,27 @@ Raw Input's relative-mode delta calculation (`MGlobalImpl.cpp`, `WM_INPUT`'s `RI
 ```
 This is why capture can freeze the *absolute* position while `MMouseMoveEvent` deltas keep flowing normally — they were never coupled in the first place.
 
-### Freezing getCursorPos() — two sites
-1. **`MGlobal::poll()`** — the `GetCursorPos` snapshot is skipped entirely while `capturingWindowId.has_value()`:
+### Freezing getCursorPos() — read-side only, not write-side
+`msst.p` (`MMouseState::p`) does double duty: it's the delta-computation baseline for `WM_INPUT`'s absolute-mode branch (must advance every message, capture or not, or every subsequent sample diffs against a stale point instead of the previous one — see below), *and* it backs `MGlobal::getCursorPos()`. Gating the writes to `msst.p` behind `capturingWindowId` (an earlier version of this feature did exactly that) freezes both at once — which breaks absolute-mode delta computation for the whole capture session for any device that reports `MOUSE_MOVE_ABSOLUTE` (RDP sessions, tablets/VMs, some touchpad drivers).
+
+The fix: `msst.p` is always kept live — both in `MGlobal::poll()`'s `GetCursorPos` snapshot and in `WM_INPUT`'s absolute-mode branch, unconditionally, regardless of capture state. The freeze is applied only at the read site:
 ```cpp
-if(!capturingWindowId.has_value())
-{
-    POINT p{}; GetCursorPos(&p);
-    ...
-    msst.p.x = (float)p.x / scale;
-    msst.p.y = (float)p.y / scale;
+// MGlobalImpl.h
+MPoint capturedCursorPos; // snapshot taken the instant capture starts
+
+// MGlobalImpl.cpp
+MPoint MGlobal::getCursorPos() {
+    if(capturingWindowId.has_value())
+        return capturedCursorPos;
+    return std::get<MMouseState>((*getBackStatePtr())[(size_t)MW::MDeviceType::Mouse]).p;
 }
 ```
-2. **A second, easy-to-miss site**: `WM_INPUT`'s absolute-mode branch (`ms.usFlags & MOUSE_MOVE_ABSOLUTE`, used by touch-style-absolute HID transports — RDP sessions, some tablets/VMs) *also* writes `msst.p.x`/`msst.p.y` directly. `dx`/`dy` are still computed unconditionally (relative deltas must keep flowing regardless of the input transport), but the position write itself is gated the same way:
+`capturedCursorPos` is populated once, in `MWindowImpl::startMouseCapture()`, **before** `capturingWindowId` is set (order matters — reading `getCursorPos()` after would just see capture as already active and return the not-yet-initialized snapshot back into itself):
 ```cpp
-dx = newX - msst.p.x;
-dy = newY - msst.p.y;
-if(!global->capturingWindowId.has_value()) {
-    msst.p.x = newX;
-    msst.p.y = newY;
-}
+global->capturedCursorPos = global->getCursorPos();
+global->capturingWindowId = id;
 ```
-Gating only site #1 would leave `getCursorPos()` silently un-frozen for these devices.
+This generalizes better than per-write-site guards: the freeze policy lives in exactly one place, so a future write site (like the absolute-mode branch, which got missed the first time this feature was built) can't silently reopen the bug.
 
 ### Force-release safety nets
 An abandoned capture (hidden + clipped cursor, nobody left to release it) is a real trap-the-user bug. Three places force-release, all calling the same private `releaseMouseCaptureInternal()`:
@@ -718,11 +735,11 @@ void coalesceEvent(size_t index, const MEvent& ev);                    // std::v
 | `MVisibilityChangeEvent` | Replace | latest state wins |
 | `MFocusChangeEvent` | Replace | latest state wins |
 | `MCharEvent` | Accumulate | all in one string |
-| `MMouseMoveEvent` | Accumulate dx/dy | configurable |
+| `MMouseMoveEvent` | Replace dx/dy | configurable; latest delta wins, not summed |
 | `MMouseScrollEvent` | Accumulate dx/dy | configurable |
-| `MTouchMoveEvent` | Accumulate dx/dy, keyed on touchId | configurable |
-| `MStylusHoverEvent` | Accumulate dx/dy | configurable |
-| `MStylusMoveEvent` | Accumulate dx/dy | configurable | 
+| `MTouchMoveEvent` | Replace new_pos + Accumulate dx/dy, keyed on touchId | configurable |
+| `MStylusHoverEvent` | Replace new_pos + Accumulate dx/dy | configurable |
+| `MStylusMoveEvent` | Replace new_pos + Accumulate dx/dy | configurable | 
 | `MGamepadTriggerEvent` | Accumulate dx/dy | configurable |
 | `MGamepadStickEvent` | Accumulate dx/dy | configurable |
 | All others | Never | every event preserved |
@@ -1067,25 +1084,27 @@ Touchpad clicks also handled in WM_INPUT.
 
 Handled in window WndProc from `WM_MOUSEMOVE` / `WM_MOUSELEAVE`.
 
+`mouseTracking` is a per-window `MWindowImpl` member (armed/reset via `isMouseTracking()`/`setMouseTracking()`), not on `MGlobal` — `TrackMouseEvent`'s armed state is inherently per-HWND in Win32, so a single shared flag on the singleton would let one window's enter/leave tracking suppress another's.
+
 ```cpp
-// MGlobal member
+// MWindowImpl member
 bool mouseTracking = false;
 
 case WM_MOUSEMOVE: {
-    if (!global->mouseTracking) {
+    if (!mw->isMouseTracking()) {
         TRACKMOUSEEVENT tme{};
         tme.cbSize    = sizeof(tme);
         tme.dwFlags   = TME_LEAVE;
         tme.hwndTrack = hwnd;
         TrackMouseEvent(&tme);
 
-        global->mouseTracking = true;
+        mw->setMouseTracking(true);
         global->push(MMouseEnterEvent{}, hwnd);
     }
     return 0;
 }
 case WM_MOUSELEAVE: {
-    global->mouseTracking = false;
+    mw->setMouseTracking(false);
     global->push(MMouseLeaveEvent{}, hwnd);
     return 0;
 }
@@ -1284,7 +1303,7 @@ struct MGamepadState {
 };
 ```
 
-Deadzone, normalization applied before storing (~0.1 radial deadzone). Polled in `MW::poll()` — not event-driven. XInput and GameInput are both polled on the main/creator thread, sequential with `PeekMessage` drain — fast enough, no async needed.
+Deadzone, normalization applied before storing — radial deadzone derived from the standard XInput constants (`XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE`/`RIGHT_THUMB_DEADZONE`, normalized by 32767): ~0.24 left stick, ~0.27 right stick, shared by both the XInput and GameInput backends. Polled in `MW::poll()` — not event-driven. XInput and GameInput are both polled on the main/creator thread, sequential with `PeekMessage` drain — fast enough, no async needed.
 
 ---
 
@@ -1395,6 +1414,8 @@ SetWindowPos(hwnd, nullptr, 0, 0, r.right-r.left, r.bottom-r.top, SWP_NOMOVE|...
 | Cursor input is raw RGBA8 + hotspot, not .cur | Same "thin library" philosophy as icons |
 | Cursor applied via WM_SETCURSOR, not pushed at set-time | OS re-queries the cursor on every HTCLIENT mouse move; pushing would be redundant/stale |
 | Mouse capture executes synchronously, not queued | ClipCursor/ShowCursor must react to the current OS cursor position at call time |
+| Initial focus queried via GetFocus() and pushed manually | Only unrecoverable dropped-message gap (no isFocused() accessor exists); simpler than moving GWLP_USERDATA setup into WM_NCCREATE |
+| mouseTracking/pendingSurrogate moved to per-window MWindowImpl | Both were incorrectly shared across all windows via MGlobal, causing cross-window enter/leave and surrogate-pair bugs |
 | Capture requires focus + cursor-inside-client, checked via GetCursorPos+PtInRect | Cheap, correct, no dependency on message-timing-sensitive mouseTracking flag |
 | Second startMouseCapture() call fails (no auto-steal) | Focus precondition already makes concurrent capture rare; silent steal is surprising |
 | endMouseCapture() does not warp the cursor | Deliberate: less jarring than GLFW's snap-to-start-position |

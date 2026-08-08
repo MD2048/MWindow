@@ -90,27 +90,22 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             global->push(MCloseRequestEvent{}, hwnd);
             return 1;
         }
-        case WM_DESTROY:
-        {
-            PostQuitMessage(0);
-            return 1; // MWindowImpl::close() has been already called at this point
-        }
         case WM_MOUSEMOVE: {
-            if (!global->mouseTracking) {
+            if (!mw->isMouseTracking()) {
                 TRACKMOUSEEVENT tme{};
                 tme.cbSize    = sizeof(tme);
                 tme.dwFlags   = TME_LEAVE;
                 tme.hwndTrack = hwnd;
                 TrackMouseEvent(&tme);
 
-                global->mouseTracking = true;
+                mw->setMouseTracking(true);
                 global->push(MMouseEnterEvent{}, hwnd);
             }
             return 0;
         }
 
     case WM_MOUSELEAVE: {
-        global->mouseTracking = false;
+        mw->setMouseTracking(false);
         global->push(MMouseLeaveEvent{}, hwnd);
         return 0;
     }
@@ -121,22 +116,22 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                 return 0;
 
             if (IS_HIGH_SURROGATE(utf16)) {
-                global->pendingSurrogate = utf16;
+                mw->setPendingSurrogate(utf16);
                 return 0;
             }
 
             std::wstring utf16str;
             if (IS_LOW_SURROGATE(utf16)) {
-                if (global->pendingSurrogate != 0) {
-                    utf16str += global->pendingSurrogate;
+                if (mw->getPendingSurrogate() != 0) {
+                    utf16str += mw->getPendingSurrogate();
                     utf16str += utf16;
-                    global->pendingSurrogate = 0;
+                    mw->setPendingSurrogate(0);
                 } else {
                     // Orphaned low surrogate: discard
                     return 0;
                 }
             } else {
-                global->pendingSurrogate = 0;
+                mw->setPendingSurrogate(0);
                 utf16str += utf16;
             }
 
@@ -565,10 +560,12 @@ LRESULT CALLBACK NotificationWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 
                             dx = newX - msst.p.x;
                             dy = newY - msst.p.y;
-                            if(!global->capturingWindowId.has_value()) {
-                                msst.p.x = newX;
-                                msst.p.y = newY;
-                            }
+                            // Always update — this is the delta-computation baseline, not the
+                            // capture-frozen public position (that's capturedCursorPos, applied
+                            // in getCursorPos()). Freezing this too would make every subsequent
+                            // sample diff against a stale point instead of the previous one.
+                            msst.p.x = newX;
+                            msst.p.y = newY;
                         } else {
                             float scale = global->monitorFromPoint(msst.p).dpiScale;
 
@@ -768,9 +765,7 @@ namespace MW {
     , head{0}
     , tail{0}
     , notificationHWND{nullptr}
-    , mouseTracking{false}
     , gamepadMightHaveConnected{false}
-    , pendingSurrogate{}
     {
         settings = config;
         mask = settings.eventQueueCapacity - 1;
@@ -805,7 +800,12 @@ namespace MW {
             gameInput = nullptr;
         }
         PostMessageW(reinterpret_cast<HWND>(notificationHWND), WM_CLOSE, 0, 0);
-        for(auto& entry : windows)
+
+        // Detach before destroying: each delete below runs ~MWindowImpl(), which calls
+        // unregisterWindow() and erases from `windows` — mutating the container this loop
+        // would otherwise be iterating.
+        auto toDelete = std::move(windows);
+        for(auto& entry : toDelete)
         {
             delete entry.window;
         }
@@ -813,6 +813,7 @@ namespace MW {
 
     void MGlobal::shutdown() {
         delete ptr;
+        ptr = nullptr;
     }
 
     void MGlobal::poll() {
@@ -824,8 +825,9 @@ namespace MW {
         
         assert(IsWindow(reinterpret_cast<HWND>(notificationHWND)));
 
-        if(!capturingWindowId.has_value())
         {
+            // Always kept live — getCursorPos() is what applies the capture freeze
+            // (via capturedCursorPos), not this internal tracking value.
             POINT p{};
             GetCursorPos(&p);
             HANDLE hMon = MonitorFromPoint(p, MONITOR_DEFAULTTONEAREST);
@@ -1051,6 +1053,8 @@ namespace MW {
     }
 
     MPoint MGlobal::getCursorPos() {
+        if(capturingWindowId.has_value())
+            return capturedCursorPos;
         return std::get<MMouseState>((*getBackStatePtr())[(size_t)MW::MDeviceType::Mouse]).p;
     }
 
@@ -1070,7 +1074,7 @@ namespace MW {
         if((h - t) >= settings.eventQueueCapacity)
             return false; // buffer is full, drop
 
-        MEventSlot slot { std::move(ev), false, 0 };
+        MEventSlot slot { ev, false, 0 }; // copy, not move — coalesceEvent() below may still read ev
         if(hwnd) {
             auto opt = idFromHWND(hwnd);
             if(!opt)
@@ -1149,8 +1153,8 @@ namespace MW {
             [](const MFocusChangeEvent& ev) { return true; },
             [](const MCharEvent& ev) { return true; },
 
-            [b = settings.gamepadCoalescing](const MGamepadTriggerEvent& ev) { return true; },
-            [b = settings.gamepadCoalescing](const MGamepadStickEvent& ev) { return true; },
+            [b = settings.gamepadCoalescing](const MGamepadTriggerEvent& ev) { return b; },
+            [b = settings.gamepadCoalescing](const MGamepadStickEvent& ev) { return b; },
 
             [](const auto&) { return false; }
         }, a);
@@ -1180,27 +1184,29 @@ namespace MW {
         }, a.event, b.event);
     }
     size_t MGlobal::findCoalescableEventIndex(const MEventSlot& ev, void* hwnd) {
-        std::size_t h = head-1;
-        std::size_t t = tail-1;
-        while(h != t)
-        {
-            MEventSlot& slot { buffer[h & mask] };
-            if(canCoalesce(slot, ev))
-                return h & mask;
-            h--;
-        }
+        if(head == tail)
+            return std::numeric_limits<size_t>::max(); // buffer empty, nothing to coalesce with
+
+        // Only the most recently pushed slot is eligible — if it doesn't match, some
+        // other event sits between it and the one being pushed, so coalescing must stop
+        // here rather than reach further back (see docs/Events.md "Ring Buffer & Coalescing").
+        std::size_t h = head - 1;
+        MEventSlot& slot { buffer[h & mask] };
+        if(canCoalesce(slot, ev))
+            return h & mask;
+
         return std::numeric_limits<size_t>::max();
     }
     void MGlobal::coalesceEvent(size_t index, const MEvent& ev) {
         MEventSlot& slot { buffer[index] };
         std::visit(Overloaded {
-            [ev](MMouseMoveEvent& e) { e.timestamp = std::get<MMouseMoveEvent>(ev).timestamp; 
-                e.dx += std::get<MMouseMoveEvent>(ev).dx; 
-                e.dy += std::get<MMouseMoveEvent>(ev).dy; 
+            [ev](MMouseMoveEvent& e) { e.timestamp = std::get<MMouseMoveEvent>(ev).timestamp;
+                e.dx = std::get<MMouseMoveEvent>(ev).dx;
+                e.dy = std::get<MMouseMoveEvent>(ev).dy;
             },
             [ev](MMouseScrollEvent& e) { e.timestamp = std::get<MMouseScrollEvent>(ev).timestamp;
-                e.dx = std::get<MMouseScrollEvent>(ev).dx;
-                e.dy = std::get<MMouseScrollEvent>(ev).dy;
+                e.dx += std::get<MMouseScrollEvent>(ev).dx;
+                e.dy += std::get<MMouseScrollEvent>(ev).dy;
                 e.mods = std::get<MMouseScrollEvent>(ev).mods;
             },
             [ev](MTouchMoveEvent& e) { e.timestamp = std::get<MTouchMoveEvent>(ev).timestamp;

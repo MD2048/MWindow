@@ -215,11 +215,6 @@ inline void initializeDeviceState(MDeviceState& st)
     );
 }
 
-inline MKey translateVK(USHORT vk)
-{
-    
-}
-
 inline uint32_t dmBitsPerChannel(DWORD dmBitsPerPel) {
     switch (dmBitsPerPel) {
         case 30: return 10;  // HDR10

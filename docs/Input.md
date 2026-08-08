@@ -54,6 +54,8 @@ MPoint pos = MW::getCursorPos(); // logical, sampled once per poll()
 
 Cursor position is sampled once at the start of each `poll()` call. All events in a frame share this position.
 
+While a window has mouse capture active (`window->startMouseCapture()`), `getCursorPos()` freezes at the position it had the instant capture began, regardless of physical mouse movement — `MMouseMoveEvent` deltas keep flowing normally. See [Threading](Threading.md#exception-mouse-capture--main-thread-only).
+
 ```cpp
 enum class MMouseButton { Left, Middle, Right, X1, X2 };
 
@@ -89,7 +91,7 @@ enum class MGamepadButton : uint32_t {
     Count
 };
 
-A radial deadzone of ~0.1 is applied before storing. Button names use neutral labels — `ActionBottom` maps to A on Xbox, Cross on PlayStation.
+A radial deadzone is applied before storing, derived from the standard XInput constants (`XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE`/`RIGHT_THUMB_DEADZONE`, normalized by 32767) for both the XInput and GameInput backends: ~0.24 on the left stick, ~0.27 on the right stick. Button names use neutral labels — `ActionBottom` maps to A on Xbox, Cross on PlayStation.
 
 ```cpp
 // Disable gamepad support entirely:

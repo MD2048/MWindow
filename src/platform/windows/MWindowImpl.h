@@ -58,6 +58,10 @@ namespace MW {
         bool mouseCaptured = false;
         bool captureHidCursor = false;   // whether *this* capture session called ShowCursor(FALSE)
 
+        bool mouseTracking = false;      // WM_MOUSELEAVE armed state (per-window, TrackMouseEvent)
+        wchar_t pendingSurrogate = 0;    // for WM_CHAR surrogate pair handling (per-window, since
+                                          // keyboard focus — and thus WM_CHAR delivery — is per-window)
+
         void releaseMouseCaptureInternal();
 
     public:
@@ -93,6 +97,12 @@ namespace MW {
         void endMouseCapture() override;
         [[nodiscard]] bool isMouseCaptured() const override;
         void updateCaptureClip();   // recomputes/re-applies ClipCursor; called from MWindowWndProc too
+
+        // Internal WndProc bookkeeping — used only from MGlobalImpl.cpp's MWindowWndProc
+        bool isMouseTracking() const { return mouseTracking; }
+        void setMouseTracking(bool tracking) { mouseTracking = tracking; }
+        wchar_t getPendingSurrogate() const { return pendingSurrogate; }
+        void setPendingSurrogate(wchar_t s) { pendingSurrogate = s; }
 
         void resize(MSize sz) override;
         MSize getSize() const override; 

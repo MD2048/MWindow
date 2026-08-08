@@ -26,7 +26,6 @@ namespace MW
         back_state = &state2;
 
         state2.desc = desc;
-        state2.focused = desc.visible;;
         float scale = 0;
 
         state2.windowStyle |= WS_OVERLAPPED;
@@ -80,7 +79,19 @@ namespace MW
         id = global->registerWindow(reinterpret_cast<void*>(hw), this);
 
         SetWindowLongPtr(hw, GWLP_USERDATA, (LONG_PTR)global);
-        
+
+        // CreateWindowExW (with WS_VISIBLE) synchronously dispatches WM_SETFOCUS/WM_SIZE/etc.
+        // before returning — before GWLP_USERDATA above was even set, so MWindowWndProc
+        // couldn't resolve this window and silently dropped them. State is unaffected (it's
+        // computed directly above/below, not from catching those messages), but the initial
+        // MFocusChangeEvent is otherwise unrecoverable: there's no isFocused() accessor, so
+        // this is the only way an app can ever learn it has focus. Query and push it now that
+        // the window is registered and push() can resolve it.
+        bool hasFocus = (GetFocus() == hw);
+        state2.focused = hasFocus;
+        if(hasFocus)
+            global->push(MFocusChangeEvent{true}, hw);
+
         MMonitor mon = global->monitorFromHandle(MonitorFromWindow(hw, MONITOR_DEFAULTTONEAREST)).value();
         state2.desc.monitor = mon.id;
 
@@ -316,7 +327,7 @@ namespace MW
                     AdjustWindowRectExForDpi(&r, back.windowStyle, FALSE, 0, dpi);
                     SetWindowPos(hwnd, nullptr,
                         0,0,
-                        r.right-r.left, r.bottom-r.left,
+                        r.right-r.left, r.bottom-r.top,
                         SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 
 
@@ -562,11 +573,13 @@ namespace MW
         }
         else
         {
-            state.preFullscreenRect = {static_cast<LONG>(p.x*scale),static_cast<LONG>(p.y*scale),
-                state.preFullscreenRect.right + static_cast<LONG>(p.x*scale),
-                state.preFullscreenRect.bottom + static_cast<LONG>(p.y*scale)};
+            LONG width  = state.preFullscreenRect.right  - state.preFullscreenRect.left;
+            LONG height = state.preFullscreenRect.bottom - state.preFullscreenRect.top;
+            LONG left = static_cast<LONG>(p.x*scale);
+            LONG top  = static_cast<LONG>(p.y*scale);
+            state.preFullscreenRect = {left, top, left + width, top + height};
         }
-        
+
         state_change.store(true,std::memory_order_release);
     }
 
@@ -640,6 +653,10 @@ namespace MW
         if(hideCursor) ShowCursor(FALSE);
 
         mouseCaptured = true;
+        // Must snapshot BEFORE flipping capturingWindowId: getCursorPos() returns
+        // capturedCursorPos once capturingWindowId is set, so reading it after would
+        // just read the not-yet-initialized snapshot back into itself.
+        global->capturedCursorPos = global->getCursorPos();
         global->capturingWindowId = id;
         return true;
     }
