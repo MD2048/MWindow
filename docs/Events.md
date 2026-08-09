@@ -167,7 +167,7 @@ Not implemented yet — no event types exist in `MEvent` for this. Planned for a
 
 Events are stored in a fixed-size ring buffer. On overflow, the newest event is dropped.
 
-High-frequency events of the same type are merged before the app sees them, but only when no other event type sits between them in the queue:
+High-frequency events of the same type, targeting the same window (or both global), are merged before the app sees them — searching back through the whole pending queue for a match, not just the most recent entry. This means merging can happen across intervening events of a *different* type (e.g. a burst of touchpad `MMouseMoveEvent` samples arriving interleaved with `MCharEvent` from a held key's auto-repeat still coalesces both independently, instead of each interrupting the other's merge and flooding the buffer with uncoalesced entries). **Coalescing does not preserve relative delivery order between different event types** — use each event's own `MMicroSec timestamp` if you need to know what happened before what:
 
 | Event | Policy |
 |---|---|
@@ -176,7 +176,7 @@ High-frequency events of the same type are merged before the app sees them, but 
 | Move | `Latest` |
 | Focus change | `Latest` — keep only the final state |
 | Char input | `Accumulate` — merge strings |
-| Mouse move | `Latest` — keep only the final delta |
+| Mouse move | `Accumulate` — sum dx/dy |
 | Mouse scroll | `Accumulate` — sum dx/dy |
 | Touch move | `Latest` position + `Accumulate` delta — new_pos replaced, dx/dy summed |
 | Stylus move/hover | `Accumulate` — sum dx/dy (position also replaced with the latest) |

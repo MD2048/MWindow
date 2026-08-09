@@ -728,6 +728,8 @@ size_t findCoalescableEventIndex(const MEventSlot& ev, void* hwnd);    // finds 
 void coalesceEvent(size_t index, const MEvent& ev);                    // std::visit - coalescs
 ```
 
+`findCoalescableEventIndex` scans backward through the *entire* pending range (`head-1` down to `tail`), not just the most recent slot — it deliberately reaches past intervening events of a different type/target. An earlier version stopped at the first non-matching slot to preserve strict cross-type delivery order, but that let two independently-frequent streams to the same target (touchpad `MMouseMoveEvent` samples and `MCharEvent` from a held key's auto-repeat both route to the same focused window's `id`) permanently block each other's coalescing whenever they interleaved — every raw sample of both ended up as its own uncoalesced ring-buffer slot, filling the fixed-size buffer fast enough to overflow it (silently dropping the newest events, since overflow policy is drop-newest) well before a real mouse's lower sample rate would. Coalescing across intervening different-type events means relative delivery order between *different* event types is no longer guaranteed by queue position — each event's own `MMicroSec timestamp` is the source of truth for that, not where it landed in the queue.
+
 | Event | Policy | Notes |
 |---|---|---|
 | `MResizeEvent` | Replace | latest size wins |
@@ -735,7 +737,7 @@ void coalesceEvent(size_t index, const MEvent& ev);                    // std::v
 | `MVisibilityChangeEvent` | Replace | latest state wins |
 | `MFocusChangeEvent` | Replace | latest state wins |
 | `MCharEvent` | Accumulate | all in one string |
-| `MMouseMoveEvent` | Replace dx/dy | configurable; latest delta wins, not summed |
+| `MMouseMoveEvent` | Accumulate dx/dy | configurable |
 | `MMouseScrollEvent` | Accumulate dx/dy | configurable |
 | `MTouchMoveEvent` | Replace new_pos + Accumulate dx/dy, keyed on touchId | configurable |
 | `MStylusHoverEvent` | Replace new_pos + Accumulate dx/dy | configurable |
@@ -1416,6 +1418,8 @@ SetWindowPos(hwnd, nullptr, 0, 0, r.right-r.left, r.bottom-r.top, SWP_NOMOVE|...
 | Mouse capture executes synchronously, not queued | ClipCursor/ShowCursor must react to the current OS cursor position at call time |
 | Initial focus queried via GetFocus() and pushed manually | Only unrecoverable dropped-message gap (no isFocused() accessor exists); simpler than moving GWLP_USERDATA setup into WM_NCCREATE |
 | mouseTracking/pendingSurrogate moved to per-window MWindowImpl | Both were incorrectly shared across all windows via MGlobal, causing cross-window enter/leave and surrogate-pair bugs |
+| Coalescing scans past intervening different-type events, not just the last slot | Prevents two concurrent high-frequency streams (e.g. touchpad move + key-repeat char input) from starving each other's coalescing and overflowing the buffer; timestamps, not queue position, are the ordering source of truth |
+| MMouseMoveEvent coalesces via Accumulate, not Replace | It expresses a delta — replacing instead of summing silently discards real motion whenever multiple samples land between poll() calls |
 | Capture requires focus + cursor-inside-client, checked via GetCursorPos+PtInRect | Cheap, correct, no dependency on message-timing-sensitive mouseTracking flag |
 | Second startMouseCapture() call fails (no auto-steal) | Focus precondition already makes concurrent capture rare; silent steal is surprising |
 | endMouseCapture() does not warp the cursor | Deliberate: less jarring than GLFW's snap-to-start-position |

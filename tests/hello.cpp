@@ -183,15 +183,13 @@ int main()
     const MIconData checkerIcon = makeCheckerIcon(32, 255, 0, 0, 0, 0, 255);
     const MCursorData magentaCrosshair = makeCrosshairCursor(32, 255, 0, 255);
 
-    for (int i = 0; i < 300 && window->isAlive(); ++i) {
+    for (int i = 0; window->isAlive(); ++i) {
         poll();
 
         if (i == 20) {
             window->setIcon(greenIcon);
         }
         if (i >= 30 && i < 80) {
-            // Repeated setIcon() calls: watch Task Manager's "GDI objects" column for
-            // hello.exe (Details tab) to confirm the count stays flat, not growing by 1/call.
             window->setIcon((i % 2 == 0) ? greenIcon : checkerIcon);
         }
         if (i == 90) {

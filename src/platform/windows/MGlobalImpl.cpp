@@ -801,9 +801,6 @@ namespace MW {
         }
         PostMessageW(reinterpret_cast<HWND>(notificationHWND), WM_CLOSE, 0, 0);
 
-        // Detach before destroying: each delete below runs ~MWindowImpl(), which calls
-        // unregisterWindow() and erases from `windows` — mutating the container this loop
-        // would otherwise be iterating.
         auto toDelete = std::move(windows);
         for(auto& entry : toDelete)
         {
@@ -1184,25 +1181,30 @@ namespace MW {
         }, a.event, b.event);
     }
     size_t MGlobal::findCoalescableEventIndex(const MEventSlot& ev, void* hwnd) {
-        if(head == tail)
-            return std::numeric_limits<size_t>::max(); // buffer empty, nothing to coalesce with
-
-        // Only the most recently pushed slot is eligible — if it doesn't match, some
-        // other event sits between it and the one being pushed, so coalescing must stop
-        // here rather than reach further back (see docs/Events.md "Ring Buffer & Coalescing").
-        std::size_t h = head - 1;
-        MEventSlot& slot { buffer[h & mask] };
-        if(canCoalesce(slot, ev))
-            return h & mask;
-
+        // Scans past intervening, non-matching events instead of stopping at the first one.
+        // Two unrelated high-frequency streams to the same target (e.g. touchpad
+        // MMouseMoveEvent samples and MCharEvent from a held key's auto-repeat) would
+        // otherwise keep interrupting each other's coalescing, filling the ring buffer with
+        // uncoalesced entries fast enough to overflow it and silently drop the newest events.
+        // Cross-type delivery order is intentionally not preserved by queue position — each
+        // event carries its own MMicroSec timestamp for that.
+        std::size_t h = head-1;
+        std::size_t t = tail-1;
+        while(h != t)
+        {
+            MEventSlot& slot { buffer[h & mask] };
+            if(canCoalesce(slot, ev))
+                return h & mask;
+            h--;
+        }
         return std::numeric_limits<size_t>::max();
     }
     void MGlobal::coalesceEvent(size_t index, const MEvent& ev) {
         MEventSlot& slot { buffer[index] };
         std::visit(Overloaded {
             [ev](MMouseMoveEvent& e) { e.timestamp = std::get<MMouseMoveEvent>(ev).timestamp;
-                e.dx = std::get<MMouseMoveEvent>(ev).dx;
-                e.dy = std::get<MMouseMoveEvent>(ev).dy;
+                e.dx += std::get<MMouseMoveEvent>(ev).dx;
+                e.dy += std::get<MMouseMoveEvent>(ev).dy;
             },
             [ev](MMouseScrollEvent& e) { e.timestamp = std::get<MMouseScrollEvent>(ev).timestamp;
                 e.dx += std::get<MMouseScrollEvent>(ev).dx;
