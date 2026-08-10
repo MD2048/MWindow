@@ -36,6 +36,7 @@ window->setWindowMode(MW::MWindowMode::Fullscreen);
 window->setTitle("New Title");
 window->setIcon(myIconData);
 window->setCursor(myCursorData);
+window->setTextInputEnabled(false);
 window->show();
 window->hide();
 window->close();

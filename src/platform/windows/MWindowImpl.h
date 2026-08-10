@@ -93,6 +93,9 @@ namespace MW {
         void setCursor(const MCursorData& cursor) override;
         HCURSOR getCursorHandle() const { return cursor_handle; }
 
+        void setTextInputEnabled(bool enabled) override;
+        [[nodiscard]] bool isTextInputEnabled() const override;
+
         bool startMouseCapture(bool hideCursor) override;
         void endMouseCapture() override;
         [[nodiscard]] bool isMouseCaptured() const override;

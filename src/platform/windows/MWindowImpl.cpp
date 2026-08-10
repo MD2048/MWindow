@@ -243,6 +243,10 @@ namespace MW
             SetWindowTextW(hwnd, toWide(back.desc.title).c_str());
             front.desc.title = back.desc.title;
         }
+        if(back.desc.textInputEnabled != front.desc.textInputEnabled)
+        {
+            front.desc.textInputEnabled = back.desc.textInputEnabled;
+        }
         if(back.iconVersion != front.iconVersion)
         {
             HICON newIcon = back.desc.icon.has_value() ? createHIconFromRGBA(*back.desc.icon) : nullptr;
@@ -499,6 +503,20 @@ namespace MW
 
     const std::string& MWindowImpl::getTitle() const {
         return getFrontStatePtr()->desc.title;
+    }
+
+    void MWindowImpl::setTextInputEnabled(bool enabled) {
+        std::lock_guard<std::mutex> lock(back_state_lock);
+
+        MWindowState& state = *getBackStatePtr();
+
+        if(state.desc.textInputEnabled == enabled) return;
+        state.desc.textInputEnabled = enabled;
+        state_change.store(true,std::memory_order_release);
+    }
+
+    bool MWindowImpl::isTextInputEnabled() const {
+        return getFrontStatePtr()->desc.textInputEnabled;
     }
 
     void MWindowImpl::setIcon(const MIconData& icon) {

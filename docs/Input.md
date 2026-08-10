@@ -38,13 +38,22 @@ Left and right variants of modifier keys collapse into one flag. Note: AltGr on 
 
 ### Text Input
 
-Use `MCharEvent` for text input rather than `MKeyEvent`. It carries a Unicode codepoint and fires for every character including Backspace and Enter — the app decides their meaning in context.
+Use `MCharEvent` for text input rather than `MKeyPressEvent`/`MKeyReleaseEvent`. It carries UTF-8 text and fires for every character including Backspace and Enter — the app decides their meaning in context.
 
 ```cpp
 struct MCharEvent {
     std::string input;
 };
 ```
+
+Text input can be turned off per window — useful for a game that doesn't want the overhead (or IME composition popups) of text tracking during real-time gameplay. `MKeyPressEvent`/`MKeyReleaseEvent` (and all mouse/gamepad input) are unaffected — only `MCharEvent` is gated:
+
+```cpp
+window->setTextInputEnabled(false);   // async, like setTitle() — takes effect next poll()
+bool enabled = window->isTextInputEnabled();
+```
+
+This also discards IME-composed text: by the time an IME composition commits, Windows synthesizes a normal `WM_CHAR` for it with no marker distinguishing it from a physically-typed character, so the same check that gates regular typing catches IME input too — no separate IME handling exists or is needed. Also settable at creation via `MWindowDesc::textInputEnabled` (default `true`).
 
 ## Mouse
 

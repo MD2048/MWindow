@@ -110,6 +110,12 @@ LRESULT CALLBACK MWindowWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         return 0;
     }
         case WM_CHAR: {
+            if(!state->desc.textInputEnabled) {
+                mw->setPendingSurrogate(0); // don't let a stale high surrogate survive to combine
+                                             // incorrectly with a low surrogate after re-enabling
+                return 0;
+            }
+
             wchar_t utf16 = static_cast<wchar_t>(wParam);
 
             if (utf16 == 0)
@@ -837,8 +843,17 @@ namespace MW {
 
         MSG msg;
         while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
-            TranslateMessage(&msg);
-            DispatchMessage(&msg);
+            bool skipTranslate = false;
+            if (msg.message == WM_KEYDOWN || msg.message == WM_SYSKEYDOWN) {
+                // Avoid the keyboard-layout/dead-key lookup and an extra WM_CHAR round-trip
+                // through the queue when this window doesn't want text input at all.
+                auto opt = ptrFromHWND(msg.hwnd);
+                if (opt && !(*opt)->getFrontStatePtr()->desc.textInputEnabled)
+                    skipTranslate = true;
+            }
+            if (!skipTranslate)
+                TranslateMessage(&msg);
+            DispatchMessage(&msg); // unconditional — WM_SYSKEYDOWN still needs DefWindowProc for Alt+F4 etc.
         }
         if(!settings.ignoreGamepads)
         {

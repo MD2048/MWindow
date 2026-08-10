@@ -68,6 +68,9 @@ namespace MW {
         virtual void setIcon(const MIconData& icon) = 0;
         virtual void setCursor(const MCursorData& cursor) = 0;
 
+        virtual void setTextInputEnabled(bool enabled) = 0;
+        [[nodiscard]] virtual bool isTextInputEnabled() const = 0;
+
         // Every coordinate in logical desktop space
 
         virtual void     resize(MSize sz) = 0;
@@ -297,6 +300,8 @@ struct MWindowDesc {
 
     std::optional<MIconData> icon;   // nullopt = OS default icon — see section 10
     std::optional<MCursorData> cursor;   // nullopt = OS default cursor — see section 11
+
+    bool textInputEnabled = true;   // if false, WM_CHAR (and IME-committed text) is discarded
 };
 ```
 
@@ -1044,6 +1049,16 @@ if (!(ms.usFlags & MOUSE_MOVE_ABSOLUTE)) {
 
 `MWindowImpl` member: `wchar_t pendingSurrogate = 0`
 
+### Disabling text input (`textInputEnabled`)
+Two cooperating checks, not one — each covers a gap the other doesn't:
+
+1. **`WM_CHAR` guard** (`MGlobalImpl.cpp`, top of the `WM_CHAR` case): `if(!state->desc.textInputEnabled) { mw->setPendingSurrogate(0); return 0; }`. This is the correctness guarantee — it catches *every* source of `WM_CHAR`, including IME composition. By the time an IME composition commits, Windows synthesizes a normal `WM_CHAR` with no marker distinguishing it from a physically-typed character, so this single check is sufficient; no separate `WM_IME_*`/`imm.h` handling exists or is needed. Resetting `pendingSurrogate` here avoids a stale high surrogate incorrectly combining with an unrelated low surrogate after re-enabling.
+2. **`TranslateMessage` skip** (`MGlobal::poll()`'s message pump): for `WM_KEYDOWN`/`WM_SYSKEYDOWN` specifically, look up the target window via `ptrFromHWND(msg.hwnd)` and skip `TranslateMessage` if its `textInputEnabled` is false — avoids the keyboard-layout/dead-key lookup work and an extra `WM_CHAR` round-trip through the queue that the `WM_CHAR` guard alone wouldn't prevent. This is a pure optimization layered on top of (1), not a substitute for it — IME-injected `WM_CHAR` bypasses `WM_KEYDOWN`/`TranslateMessage` entirely, so only the `WM_CHAR`-level check actually stops it. `DispatchMessage` stays unconditional regardless — `WM_SYSKEYDOWN`'s default handling covers Alt+F4 and other system accelerators.
+
+`textInputEnabled` lives on `MWindowDesc` (see section 7) and follows the exact `setTitle()`/`title` double-buffered pattern — async, per-window, applied by `handleStateRequests()` at the top of the next `poll()`. Deliberately **not** synchronous like `startMouseCapture()`: a toggle like this has no precondition to check "right now" and no immediate Win32 side effect — its only meaningful moment is the start of the next processed frame's input, which is exactly when the async pattern already applies changes.
+
+Known, accepted edge case: toggling mid-dead-key-composition (e.g. partway through typing an accented character) could interrupt that composition. Narrow enough not to be worth guarding against.
+
 ---
 
 ## 19. WM_POINTER (Touch + Stylus)
@@ -1420,6 +1435,9 @@ SetWindowPos(hwnd, nullptr, 0, 0, r.right-r.left, r.bottom-r.top, SWP_NOMOVE|...
 | mouseTracking/pendingSurrogate moved to per-window MWindowImpl | Both were incorrectly shared across all windows via MGlobal, causing cross-window enter/leave and surrogate-pair bugs |
 | Coalescing scans past intervening different-type events, not just the last slot | Prevents two concurrent high-frequency streams (e.g. touchpad move + key-repeat char input) from starving each other's coalescing and overflowing the buffer; timestamps, not queue position, are the ordering source of truth |
 | MMouseMoveEvent coalesces via Accumulate, not Replace | It expresses a delta — replacing instead of summing silently discards real motion whenever multiple samples land between poll() calls |
+| textInputEnabled toggle is async (setTitle-style), not synchronous | No precondition to check "right now" and no immediate side effect — only ever meaningful starting next poll() anyway |
+| textInputEnabled scoped to WM_CHAR only, not all keyboard input | MKeyPressEvent/MKeyReleaseEvent (movement/action keys) are needed regardless; only the text-composition layer is dead weight during real-time control |
+| No separate IME on/off mechanism | IME-committed text arrives as an ordinary WM_CHAR with no origin marker, so the single WM_CHAR guard already catches it |
 | Capture requires focus + cursor-inside-client, checked via GetCursorPos+PtInRect | Cheap, correct, no dependency on message-timing-sensitive mouseTracking flag |
 | Second startMouseCapture() call fails (no auto-steal) | Focus precondition already makes concurrent capture rare; silent steal is surprising |
 | endMouseCapture() does not warp the cursor | Deliberate: less jarring than GLFW's snap-to-start-position |

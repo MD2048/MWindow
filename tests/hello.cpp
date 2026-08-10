@@ -173,6 +173,14 @@ int main()
                     std::cout << "startMouseCapture() -> " << (ok ? "true" : "false") << '\n';
                 }
             }
+            // Manual test: press T to toggle text input. While disabled, typing (any key,
+            // including held/repeating ones) should produce no "MCharEvent" prints below,
+            // while MKeyPressEvent/MKeyReleaseEvent keep arriving regardless.
+            if (kp->key == MKey::T) {
+                bool enabled = !mw->isTextInputEnabled();
+                mw->setTextInputEnabled(enabled);
+                std::cout << "setTextInputEnabled(" << (enabled ? "true" : "false") << ")\n";
+            }
         }
         return MEventResult::Consumed;
     });

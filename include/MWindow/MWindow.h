@@ -71,6 +71,9 @@ namespace MW {
         virtual void setIcon(const MIconData& icon) = 0;
         virtual void setCursor(const MCursorData& cursor) = 0;
 
+        virtual void setTextInputEnabled(bool enabled) = 0;
+        [[nodiscard]] virtual bool isTextInputEnabled() const = 0;
+
         // Every coordinate in logical desktop space
 
         virtual void     resize(MSize sz) = 0;
